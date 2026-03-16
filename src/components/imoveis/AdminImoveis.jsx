@@ -48,12 +48,12 @@ const SORT_OPTIONS = [
 // --- KPI Card ---
 function KPICard({ label, value, icon: Icon, color }) {
   return (
-    <div className="bg-white rounded-xl border border-[#E8E2D8] p-4 flex items-center gap-3">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color}`}>
-        <Icon className="w-5 h-5" />
+    <div className="bg-white rounded-xl border border-[#E8E2D8] p-3 md:p-4 flex items-center gap-2 md:gap-3">
+      <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center ${color}`}>
+        <Icon className="w-4 h-4 md:w-5 md:h-5" />
       </div>
       <div>
-        <p className="text-2xl font-bold text-[#1B2B3A]">{value}</p>
+        <p className="text-xl md:text-2xl font-bold text-[#1B2B3A]">{value}</p>
         <p className="text-xs text-[#8A8A8A]">{label}</p>
       </div>
     </div>
@@ -79,13 +79,47 @@ function PortalDots({ propertyId, getPortalStatusForProperty }) {
 
 // --- Property List Item ---
 function PropertyListItem({ property, onEdit, onDuplicate, onDelete, getPortalStatusForProperty }) {
-  const [showActions, setShowActions] = useState(false);
   const img = property.images?.[0];
-  return (
-    <div className="bg-white rounded-xl border border-[#E8E2D8] p-3 flex gap-3 items-center hover:shadow-md transition-all group">
+  const badge = property.is_launch ? { label: 'Lançamento', cls: 'bg-blue-50 text-blue-700 border-blue-200' }
+    : property.is_featured ? { label: 'Destaque', cls: 'bg-amber-50 text-amber-700 border-amber-200' }
+    : property.badge ? { label: property.badge, cls: 'bg-purple-50 text-purple-700 border-purple-200' }
+    : null;
+
+  /* ---- MOBILE (< md) ---- */
+  const mobileCard = (
+    <div className="md:hidden bg-white rounded-xl border border-[#E8E2D8] p-3 hover:shadow-md transition-all">
+      <div className="flex gap-3">
+        {/* Thumbnail */}
+        <div className="w-[56px] h-[56px] rounded-lg bg-slate-100 flex-shrink-0 overflow-hidden">
+          {img ? <img src={img} alt="" className="w-full h-full object-cover" />
+            : <div className="w-full h-full flex items-center justify-center"><Home className="w-5 h-5 text-gray-300" /></div>}
+        </div>
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold text-[#1B2B3A] truncate leading-tight">{property.title}</h3>
+          {property.neighborhood && (
+            <p className="text-xs text-[#8A8A8A] truncate mt-0.5 leading-tight">{property.neighborhood}</p>
+          )}
+          {badge && (
+            <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border mt-1 ${badge.cls}`}>{badge.label}</span>
+          )}
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-sm font-bold text-[#C4A265]">{formatBRL(property.price)}</span>
+            <button onClick={() => onEdit(property)} className="p-1.5 -mr-1 rounded-lg active:bg-slate-100" title="Editar">
+              <Edit2 className="w-4 h-4 text-[#8A8A8A]" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ---- DESKTOP (>= md) ---- */
+  const desktopCard = (
+    <div className="hidden md:flex bg-white rounded-xl border border-[#E8E2D8] p-3 gap-3 items-center hover:shadow-md transition-all group">
       <div className="w-20 h-[60px] rounded-lg bg-slate-100 flex-shrink-0 overflow-hidden">
-        {img ? <img src={img} alt="" className="w-full h-full object-cover" /> :
-          <div className="w-full h-full flex items-center justify-center"><Home className="w-5 h-5 text-gray-300" /></div>}
+        {img ? <img src={img} alt="" className="w-full h-full object-cover" />
+          : <div className="w-full h-full flex items-center justify-center"><Home className="w-5 h-5 text-gray-300" /></div>}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -126,6 +160,8 @@ function PropertyListItem({ property, onEdit, onDuplicate, onDelete, getPortalSt
       </div>
     </div>
   );
+
+  return <>{mobileCard}{desktopCard}</>;
 }
 
 // --- Property Grid Card ---
@@ -136,21 +172,27 @@ function PropertyGridCard({ property, onEdit, onDuplicate, onDelete }) {
       <div className="aspect-[16/10] bg-slate-100 relative overflow-hidden">
         {img ? <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> :
           <div className="w-full h-full flex items-center justify-center"><Home className="w-10 h-10 text-gray-200" /></div>}
-        <span className={`absolute top-2 right-2 text-xs px-2 py-1 rounded-full border ${STATUS_COLORS[property.status] || STATUS_COLORS['Indisponível']}`}>
+        <span className={`absolute top-2 right-2 text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 md:py-1 rounded-full border ${STATUS_COLORS[property.status] || STATUS_COLORS['Indisponível']}`}>
           {property.status}
         </span>
-        {property.is_featured && <span className="absolute top-2 left-2 text-xs bg-amber-500 text-white px-2 py-1 rounded-full">Destaque</span>}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+        {property.is_featured && <span className="absolute top-2 left-2 text-[10px] md:text-xs bg-amber-500 text-white px-1.5 md:px-2 py-0.5 md:py-1 rounded-full">Destaque</span>}
+        {/* Desktop: hover overlay */}
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all hidden md:flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
           <button onClick={() => onEdit(property)} className="p-2 bg-white rounded-full shadow hover:bg-gray-50"><Edit2 className="w-4 h-4" /></button>
           <button onClick={() => onDuplicate(property)} className="p-2 bg-white rounded-full shadow hover:bg-gray-50"><Copy className="w-4 h-4" /></button>
           <button onClick={() => onDelete(property)} className="p-2 bg-white rounded-full shadow hover:bg-red-50"><Trash2 className="w-4 h-4 text-red-500" /></button>
         </div>
       </div>
-      <div className="p-4 flex-1 flex flex-col">
-        <h3 className="font-medium text-[#1B2B3A] line-clamp-2 text-sm">{property.title}</h3>
-        {property.neighborhood && <p className="text-xs text-[#8A8A8A] mt-0.5 flex items-center gap-1"><MapPin className="w-3 h-3" />{property.neighborhood}</p>}
-        <p className="text-[#C4A265] font-bold text-lg mt-2">{formatBRL(property.price)}</p>
-        <div className="flex gap-3 mt-2 text-xs text-[#8A8A8A]">
+      <div className="p-3 md:p-4 flex-1 flex flex-col">
+        <h3 className="font-medium text-[#1B2B3A] line-clamp-1 md:line-clamp-2 text-sm">{property.title}</h3>
+        {property.neighborhood && <p className="text-xs text-[#8A8A8A] mt-0.5 flex items-center gap-1 truncate"><MapPin className="w-3 h-3 flex-shrink-0" />{property.neighborhood}</p>}
+        <div className="flex items-center justify-between mt-1.5 md:mt-2">
+          <p className="text-[#C4A265] font-bold text-base md:text-lg">{formatBRL(property.price)}</p>
+          <button onClick={() => onEdit(property)} className="md:hidden p-1.5 rounded-lg active:bg-slate-100" title="Editar">
+            <Edit2 className="w-4 h-4 text-[#8A8A8A]" />
+          </button>
+        </div>
+        <div className="flex gap-2 md:gap-3 mt-1.5 md:mt-2 text-xs text-[#8A8A8A]">
           {property.bedrooms > 0 && <span className="flex items-center gap-0.5"><BedDouble className="w-3 h-3" />{property.bedrooms}</span>}
           {property.bathrooms > 0 && <span className="flex items-center gap-0.5"><Bath className="w-3 h-3" />{property.bathrooms}</span>}
           {property.garage > 0 && <span className="flex items-center gap-0.5"><Car className="w-3 h-3" />{property.garage}</span>}
@@ -196,7 +238,8 @@ export default function AdminImoveis({ session }) {
     if (activeTab === 'historico') {
       historyHook.loadHistory();
     }
-  }, [activeTab, historyHook]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
@@ -266,7 +309,7 @@ export default function AdminImoveis({ session }) {
   return (
     <div className="space-y-6 fade-in">
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-white rounded-xl border border-[#E8E2D8] p-1 w-fit">
+      <div className="flex items-center gap-1 bg-white rounded-xl border border-[#E8E2D8] p-1 w-full md:w-fit overflow-x-auto">
         <button onClick={() => setActiveTab('imoveis')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'imoveis' ? 'bg-[#1B2B3A] text-white' : 'text-[#8A8A8A] hover:text-[#1B2B3A]'}`}>
           Meus Imóveis
@@ -284,7 +327,7 @@ export default function AdminImoveis({ session }) {
       {activeTab === 'imoveis' && (
         <>
           {/* KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
             <KPICard label="Total de imóveis" value={kpis.total} icon={Home} color="bg-[#1B2B3A]/10 text-[#1B2B3A]" />
             <KPICard label="À venda" value={kpis.aVenda} icon={Tag} color="bg-green-50 text-green-700" />
             <KPICard label="Para aluguel" value={kpis.aluguel} icon={Building2} color="bg-blue-50 text-blue-700" />
@@ -292,16 +335,16 @@ export default function AdminImoveis({ session }) {
           </div>
 
           {/* Actions Bar */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-[200px] relative">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <div className="w-full md:flex-1 md:min-w-[200px] relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A8A8A]" />
-              <input type="text" placeholder="Buscar por título, bairro ou endereço..."
+              <input type="text" placeholder="Buscar por título, bairro..."
                 value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8E2D8] text-sm focus:outline-none focus:border-[#C4A265]" />
+                className="w-full pl-10 pr-4 py-2 md:py-2.5 rounded-xl border border-[#E8E2D8] text-sm focus:outline-none focus:border-[#C4A265]" />
             </div>
             <button onClick={() => setShowFilters(!showFilters)}
-              className={`px-3 py-2.5 rounded-xl border text-sm flex items-center gap-1.5 ${showFilters ? 'bg-[#1B2B3A] text-white border-[#1B2B3A]' : 'border-[#E8E2D8] text-[#8A8A8A] hover:border-[#C4A265]'}`}>
-              <Filter className="w-4 h-4" />Filtros
+              className={`px-3 py-2 md:py-2.5 rounded-xl border text-sm flex items-center gap-1.5 ${showFilters ? 'bg-[#1B2B3A] text-white border-[#1B2B3A]' : 'border-[#E8E2D8] text-[#8A8A8A] hover:border-[#C4A265]'}`}>
+              <Filter className="w-4 h-4" /><span className="hidden md:inline">Filtros</span>
             </button>
             <div className="flex gap-1 border border-[#E8E2D8] rounded-xl p-0.5">
               <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-[#1B2B3A] text-white' : 'text-[#8A8A8A]'}`}>
@@ -312,16 +355,16 @@ export default function AdminImoveis({ session }) {
               </button>
             </div>
             <select value={filters.sortBy} onChange={e => setFilters(f => ({ ...f, sortBy: e.target.value }))}
-              className="px-3 py-2.5 rounded-xl border border-[#E8E2D8] text-sm text-[#1B2B3A] focus:outline-none focus:border-[#C4A265]">
+              className="px-2 md:px-3 py-2 md:py-2.5 rounded-xl border border-[#E8E2D8] text-xs md:text-sm text-[#1B2B3A] focus:outline-none focus:border-[#C4A265]">
               {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <label className="px-3 py-2.5 rounded-xl border border-[#E8E2D8] text-sm text-[#8A8A8A] hover:border-[#C4A265] cursor-pointer flex items-center gap-1.5">
+            <label className="hidden md:flex px-3 py-2.5 rounded-xl border border-[#E8E2D8] text-sm text-[#8A8A8A] hover:border-[#C4A265] cursor-pointer items-center gap-1.5">
               <Upload className="w-4 h-4" />Importar CSV
               <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
             </label>
             <button onClick={() => setFormModal({ open: true, property: null })}
-              className="px-4 py-2.5 bg-[#C4A265] text-white rounded-xl text-sm font-medium hover:bg-[#b89355] flex items-center gap-1.5 shadow-sm">
-              <Plus className="w-4 h-4" />Novo Imóvel
+              className="px-3 md:px-4 py-2 md:py-2.5 bg-[#C4A265] text-white rounded-xl text-sm font-medium hover:bg-[#b89355] flex items-center gap-1.5 shadow-sm">
+              <Plus className="w-4 h-4" /><span className="hidden md:inline">Novo Imóvel</span><span className="md:hidden">Novo</span>
             </button>
           </div>
 
@@ -412,8 +455,8 @@ export default function AdminImoveis({ session }) {
       {activeTab === 'historico' && (
         <div className="space-y-4">
           {/* History Filters */}
-          <div className="flex flex-wrap gap-3 items-end bg-white rounded-xl border border-[#E8E2D8] p-4">
-            <div className="flex-1 min-w-[200px]">
+          <div className="flex flex-wrap gap-2 md:gap-3 items-end bg-white rounded-xl border border-[#E8E2D8] p-3 md:p-4">
+            <div className="w-full md:flex-1 md:min-w-[200px]">
               <label className="text-xs text-[#8A8A8A] mb-1 block">Filtrar por imóvel</label>
               <select value={historyFilter} onChange={e => setHistoryFilter(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-[#E8E2D8] text-sm focus:outline-none focus:border-[#C4A265]">
@@ -421,7 +464,7 @@ export default function AdminImoveis({ session }) {
                 {filtered.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
             </div>
-            <div className="flex-1 min-w-[200px]">
+            <div className="w-full md:flex-1 md:min-w-[200px]">
               <label className="text-xs text-[#8A8A8A] mb-1 block">Filtrar por ação</label>
               <select value={historyActionFilter} onChange={e => setHistoryActionFilter(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-[#E8E2D8] text-sm focus:outline-none focus:border-[#C4A265]">

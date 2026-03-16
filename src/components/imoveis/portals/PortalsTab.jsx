@@ -47,14 +47,14 @@ function PortalCard({ config, publishedCount, onConfigure, onSync }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <div className="bg-white rounded-xl border border-[#E8E2D8] p-4 flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm"
+    <div className="bg-white rounded-xl border border-[#E8E2D8] p-3 md:p-4 flex flex-col gap-2 md:gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center text-white font-bold text-xs md:text-sm"
           style={{ backgroundColor: PORTAL_COLORS[config.portal_name] || '#666' }}>
           {(config.display_name || '')[0]}
         </div>
-        <div className="flex-1">
-          <h3 className="font-medium text-[#1B2B3A] text-sm">{config.display_name}</h3>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-[#1B2B3A] text-sm truncate">{config.display_name}</h3>
           <div className="flex items-center gap-1.5">
             {config.is_active ? (
               <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 className="w-3 h-3" />Ativo</span>
@@ -64,13 +64,27 @@ function PortalCard({ config, publishedCount, onConfigure, onSync }) {
           </div>
         </div>
       </div>
-      <div className="text-xs text-[#8A8A8A] space-y-1">
+      {/* Mobile: compact inline count + actions */}
+      <div className="flex md:hidden items-center gap-2 text-xs text-[#8A8A8A]">
+        <span>{publishedCount} imóveis</span>
+        <span className="text-[#E8E2D8]">·</span>
+        <button onClick={copyUrl}
+          className={`px-2 py-1 rounded text-[10px] transition-colors ${copied ? 'bg-green-100 text-green-700' : 'border border-[#E8E2D8] hover:bg-gray-50'}`}>
+          {copied ? 'Copiado!' : 'Copiar URL'}
+        </button>
+        <button onClick={() => onConfigure(config)}
+          className="p-1 border border-[#E8E2D8] rounded hover:bg-gray-50" title="Configurar">
+          <Settings className="w-3.5 h-3.5 text-[#8A8A8A]" />
+        </button>
+      </div>
+      {/* Desktop: full details */}
+      <div className="hidden md:block text-xs text-[#8A8A8A] space-y-1">
         <p>{publishedCount} imóveis publicados</p>
         {config.last_sync_at && <p className="flex items-center gap-1"><Clock className="w-3 h-3" />Última leitura: {timeAgo(config.last_sync_at)}</p>}
         {config.last_sync_status === 'error' && <p className="text-red-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Erro na última sync</p>}
       </div>
-      {/* Feed URL */}
-      <div className="bg-gray-50 rounded-lg p-2">
+      {/* Feed URL - desktop only */}
+      <div className="hidden md:block bg-gray-50 rounded-lg p-2">
         <p className="text-[10px] text-[#8A8A8A] mb-1">URL do XML Feed:</p>
         <div className="flex gap-1">
           <input type="text" readOnly value={FEED_URL} className="flex-1 text-[10px] bg-white px-2 py-1 rounded border border-[#E8E2D8] truncate" />
@@ -80,7 +94,7 @@ function PortalCard({ config, publishedCount, onConfigure, onSync }) {
           </button>
         </div>
       </div>
-      <div className="flex gap-2 mt-auto">
+      <div className="hidden md:flex gap-2 mt-auto">
         <a href={FEED_URL} target="_blank" rel="noopener noreferrer"
           className="flex-1 px-3 py-2 bg-gray-50 text-[#1B2B3A] rounded-lg text-xs font-medium hover:bg-gray-100 flex items-center justify-center gap-1">
           <Eye className="w-3 h-3" />Ver XML
@@ -359,7 +373,7 @@ export default function PortalsTab({ session, portalHook, properties, reload }) 
       {/* Portal Cards */}
       <div>
         <h3 className="text-sm font-medium text-[#1B2B3A] mb-3">Portais Conectados</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
           {portalConfigs.map(config => (
             <PortalCard key={config.portal_name} config={config}
               publishedCount={getPublishedCount(config.portal_name)}
@@ -371,22 +385,22 @@ export default function PortalsTab({ session, portalHook, properties, reload }) 
 
       {/* Property × Portal Table */}
       <div className="bg-white rounded-xl border border-[#E8E2D8]">
-        <div className="px-4 py-3 border-b border-[#E8E2D8] flex flex-wrap items-center gap-3">
-          <h3 className="font-medium text-[#1B2B3A] text-sm">Imóveis × Portais</h3>
-          <div className="flex-1" />
-          <div className="relative min-w-[180px]">
+        <div className="px-3 md:px-4 py-3 border-b border-[#E8E2D8] flex flex-wrap items-center gap-2 md:gap-3">
+          <h3 className="font-medium text-[#1B2B3A] text-sm w-full md:w-auto">Imóveis × Portais</h3>
+          <div className="hidden md:block flex-1" />
+          <div className="relative w-full md:w-auto md:min-w-[180px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8A8A8A]" />
             <input type="text" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 rounded-lg border border-[#E8E2D8] text-xs focus:outline-none focus:border-[#C4A265]" />
           </div>
           <select value={publishFilter} onChange={e => setPublishFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-[#E8E2D8] text-xs">
+            className="flex-1 md:flex-none px-2 md:px-3 py-2 rounded-lg border border-[#E8E2D8] text-xs">
             <option value="">Todos</option>
             <option value="published">Publicados</option>
             <option value="unpublished">Não publicados</option>
           </select>
           <select value={portalFilter} onChange={e => setPortalFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-[#E8E2D8] text-xs">
+            className="flex-1 md:flex-none px-2 md:px-3 py-2 rounded-lg border border-[#E8E2D8] text-xs">
             <option value="">Todos portais</option>
             {portalConfigs.map(c => <option key={c.portal_name} value={c.portal_name}>{c.display_name}</option>)}
           </select>
@@ -414,17 +428,17 @@ export default function PortalsTab({ session, portalHook, properties, reload }) 
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#E8E2D8]">
-                <th className="px-4 py-3 text-left">
+                <th className="px-2 md:px-4 py-3 text-left sticky left-0 bg-white z-10">
                   <input type="checkbox" checked={selectedIds.length === filteredProperties.length && filteredProperties.length > 0}
-                    onChange={selectAll} className="w-3.5 h-3.5 rounded border-[#E8E2D8] text-[#C4A265] focus:ring-[#C4A265]" />
+                    onChange={selectAll} className="w-3 h-3 md:w-3.5 md:h-3.5 rounded border-[#E8E2D8] text-[#C4A265] focus:ring-[#C4A265]" />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#8A8A8A]">Imóvel</th>
+                <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-[#8A8A8A] sticky left-8 md:left-11 bg-white z-10">Imóvel</th>
                 {portalConfigs.map(c => (
-                  <th key={c.portal_name} className="px-3 py-3 text-center text-xs font-medium" style={{ color: PORTAL_COLORS[c.portal_name] }}>
+                  <th key={c.portal_name} className="px-2 md:px-3 py-3 text-center text-[10px] md:text-xs font-medium whitespace-nowrap" style={{ color: PORTAL_COLORS[c.portal_name] }}>
                     {PORTAL_LABELS[c.portal_name]}
                   </th>
                 ))}
-                <th className="px-4 py-3 text-right text-xs font-medium text-[#8A8A8A]">Ações</th>
+                <th className="px-2 md:px-4 py-3 text-right text-xs font-medium text-[#8A8A8A]">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -432,19 +446,19 @@ export default function PortalsTab({ session, portalHook, properties, reload }) 
                 const portalStatus = getPortalStatusForProperty(prop.id);
                 return (
                   <tr key={prop.id} className="border-b border-[#E8E2D8] last:border-0 hover:bg-gray-50">
-                    <td className="px-4 py-3">
+                    <td className="px-2 md:px-4 py-2 md:py-3 sticky left-0 bg-white z-10">
                       <input type="checkbox" checked={selectedIds.includes(prop.id)} onChange={() => toggleSelect(prop.id)}
-                        className="w-3.5 h-3.5 rounded border-[#E8E2D8] text-[#C4A265] focus:ring-[#C4A265]" />
+                        className="w-3 h-3 md:w-3.5 md:h-3.5 rounded border-[#E8E2D8] text-[#C4A265] focus:ring-[#C4A265]" />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 md:px-4 py-2 md:py-3 sticky left-8 md:left-11 bg-white z-10">
                       <div className="flex items-center gap-2">
-                        <div className="w-10 h-8 rounded bg-slate-100 overflow-hidden flex-shrink-0">
+                        <div className="w-8 h-6 md:w-10 md:h-8 rounded bg-slate-100 overflow-hidden flex-shrink-0">
                           {prop.images?.[0] ? <img src={prop.images[0]} alt="" className="w-full h-full object-cover" /> :
                             <div className="w-full h-full flex items-center justify-center"><Home className="w-3 h-3 text-gray-300" /></div>}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-xs font-medium text-[#1B2B3A] truncate max-w-[200px]">{prop.title}</p>
-                          <p className="text-[10px] text-[#8A8A8A]">{prop.neighborhood}</p>
+                          <p className="text-xs font-medium text-[#1B2B3A] truncate max-w-[120px] md:max-w-[200px]">{prop.title}</p>
+                          <p className="text-[10px] text-[#8A8A8A] truncate max-w-[120px] md:max-w-[200px]">{prop.neighborhood}</p>
                         </div>
                       </div>
                     </td>
@@ -452,16 +466,16 @@ export default function PortalsTab({ session, portalHook, properties, reload }) 
                       const pp = portalStatus[c.portal_name];
                       const published = pp?.is_published;
                       return (
-                        <td key={c.portal_name} className="px-3 py-3 text-center">
+                        <td key={c.portal_name} className="px-2 md:px-3 py-2 md:py-3 text-center">
                           <button onClick={() => handleTogglePublish(prop.id, c.portal_name, !published)}
-                            className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all
+                            className={`w-6 h-6 md:w-7 md:h-7 rounded-full border-2 flex items-center justify-center transition-all mx-auto
                               ${published ? 'border-green-400 bg-green-50 text-green-600' : 'border-gray-200 bg-white text-gray-300 hover:border-gray-400'}`}>
-                            {published ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                            {published ? <Check className="w-3 h-3 md:w-3.5 md:h-3.5" /> : <X className="w-3 h-3 md:w-3.5 md:h-3.5" />}
                           </button>
                         </td>
                       );
                     })}
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-2 md:px-4 py-2 md:py-3 text-right">
                       <span className="text-[10px] text-[#8A8A8A]">
                         {Object.values(portalStatus).filter(pp => pp?.is_published).length}/{portalConfigs.length}
                       </span>
