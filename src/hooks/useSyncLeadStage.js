@@ -1,13 +1,3 @@
-const SB_URL = 'https://hcmpjrqpjohksoznoycq.supabase.co';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbXBqcnFwam9oa3Nvem5veWNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5OTk0NjAsImV4cCI6MjA4ODU3NTQ2MH0.XRWi4ZULpICkTucXgGVQCP5wq1RmVwOFWTdMrOEMDnw';
-
-const headers = {
-  apikey: SB_KEY,
-  Authorization: `Bearer ${SB_KEY}`,
-  'Content-Type': 'application/json',
-  Prefer: 'return=representation',
-};
-
 // CRM stage → pipeline_deals status
 const STAGE_TO_DEAL_STATUS = {
   'Novo Lead': 'novo',
@@ -29,17 +19,16 @@ const FOLLOWUP_RULES = {
 };
 
 // Sync deal status when lead stage changes
-export async function syncDealStatus(leadId, newStage) {
+export async function syncDealStatus(supabase, leadId, newStage) {
   const dealStatus = STAGE_TO_DEAL_STATUS[newStage];
   if (!dealStatus) return;
 
   try {
-    // Find deal for this lead
-    const r = await fetch(
-      `${SB_URL}/rest/v1/pipeline_deals?lead_uuid=eq.${leadId}&select=id,status`,
-      { headers }
-    );
-    const deals = await r.json();
+    const { data: deals } = await supabase
+      .from('pipeline_deals')
+      .select('id,status')
+      .eq('lead_uuid', leadId);
+
     if (!Array.isArray(deals) || deals.length === 0) return;
 
     const deal = deals[0];
@@ -49,22 +38,19 @@ export async function syncDealStatus(leadId, newStage) {
     if (dealStatus === 'fechado') update.closed_at = new Date().toISOString();
     if (dealStatus === 'perdido') update.lost_at = new Date().toISOString();
 
-    await fetch(`${SB_URL}/rest/v1/pipeline_deals?id=eq.${deal.id}`, {
-      method: 'PATCH', headers, body: JSON.stringify(update),
-    });
+    await supabase.from('pipeline_deals').update(update).eq('id', deal.id);
   } catch (e) {
     console.error('syncDealStatus error:', e);
   }
 }
 
 // Create auto follow-up when lead changes stage
-export async function createAutoFollowUp(leadId, leadName, leadPhone, newStage) {
+export async function createAutoFollowUp(supabase, leadId, leadName, leadPhone, newStage) {
   const rule = FOLLOWUP_RULES[newStage];
   if (!rule) return;
 
   const dueDate = new Date();
   dueDate.setDate(dueDate.getDate() + rule.delayDays);
-  // If delay is negative (e.g., -1 for confirmation), set to at least tomorrow
   if (rule.delayDays < 0) {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -73,16 +59,12 @@ export async function createAutoFollowUp(leadId, leadName, leadPhone, newStage) 
   dueDate.setHours(10, 0, 0, 0);
 
   try {
-    await fetch(`${SB_URL}/rest/v1/follow_ups`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        lead_uuid: leadId,
-        type: rule.type,
-        status: 'pendente',
-        due_date: dueDate.toISOString(),
-        message_text: rule.message,
-      }),
+    await supabase.from('follow_ups').insert({
+      lead_uuid: leadId,
+      type: rule.type,
+      status: 'pendente',
+      due_date: dueDate.toISOString(),
+      message_text: rule.message,
     });
   } catch (e) {
     console.error('createAutoFollowUp error:', e);
@@ -90,13 +72,15 @@ export async function createAutoFollowUp(leadId, leadName, leadPhone, newStage) 
 }
 
 // Update CRM lead stage (in Supabase)
-export async function updateLeadStage(leadId, newStage) {
+export async function updateLeadStage(supabase, leadId, newStage) {
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/crm_leads?id=eq.${leadId}`, {
-      method: 'PATCH', headers,
-      body: JSON.stringify({ stage: newStage, updated_at: new Date().toISOString() }),
-    });
-    const data = await r.json();
+    const { data, error } = await supabase
+      .from('crm_leads')
+      .update({ stage: newStage, updated_at: new Date().toISOString() })
+      .eq('id', leadId)
+      .select();
+    
+    if (error) throw error;
     return Array.isArray(data) && data[0] ? data[0] : null;
   } catch (e) {
     console.error('updateLeadStage error:', e);
@@ -105,15 +89,15 @@ export async function updateLeadStage(leadId, newStage) {
 }
 
 // Full sync when stage changes: update DB, sync deal, create follow-up
-export async function onLeadStageChange(lead, newStage, oldStage) {
+export async function onLeadStageChange(supabase, lead, newStage, oldStage) {
   // 1. Update lead in DB
-  const updated = await updateLeadStage(lead.id, newStage);
+  const updated = await updateLeadStage(supabase, lead.id, newStage);
 
   // 2. Sync deal status
-  await syncDealStatus(lead.id, newStage);
+  await syncDealStatus(supabase, lead.id, newStage);
 
   // 3. Create auto follow-up
-  await createAutoFollowUp(lead.id, lead.name, lead.phone, newStage);
+  await createAutoFollowUp(supabase, lead.id, lead.name, lead.phone, newStage);
 
   return {
     updatedLead: updated || { ...lead, stage: newStage },
@@ -122,22 +106,25 @@ export async function onLeadStageChange(lead, newStage, oldStage) {
 }
 
 // When an appointment is completed → advance lead stage
-export async function onAppointmentCompleted(appointment) {
+export async function onAppointmentCompleted(supabase, appointment) {
   const leadUuid = appointment.lead_uuid || null;
   if (!leadUuid) return null;
 
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/crm_leads?id=eq.${leadUuid}&select=*`, { headers });
-    const leads = await r.json();
+    const { data: leads } = await supabase
+      .from('crm_leads')
+      .select('*')
+      .eq('id', leadUuid);
+
     if (!Array.isArray(leads) || leads.length === 0) return null;
 
     const lead = leads[0];
 
     if (appointment.appointment_type === 'visita' && lead.stage === 'Visita Agendada') {
-      await updateLeadStage(leadUuid, 'Em Negociação');
-      await syncDealStatus(leadUuid, 'Em Negociação');
-      await createAutoFollowUp(leadUuid, lead.name, lead.phone, 'Em Negociação');
-      return { ...lead, stage: 'Em Negociação' };
+      const updated = await updateLeadStage(supabase, leadUuid, 'Em Negociação');
+      await syncDealStatus(supabase, leadUuid, 'Em Negociação');
+      await createAutoFollowUp(supabase, leadUuid, lead.name, lead.phone, 'Em Negociação');
+      return updated || { ...lead, stage: 'Em Negociação' };
     }
   } catch (e) {
     console.error('onAppointmentCompleted error:', e);
@@ -146,8 +133,7 @@ export async function onAppointmentCompleted(appointment) {
 }
 
 // Auto follow-ups when a NEW lead is created, based on temperatura
-// QUENTE: day 1 + day 3 | MORNO: day 3 + day 7 + day 15 | FRIO: day 15 + day 30
-export async function createNewLeadFollowUps(leadId, temperatura) {
+export async function createNewLeadFollowUps(supabase, leadId, temperatura) {
   const schedules = {
     QUENTE: [1, 3],
     MORNO: [3, 7, 15],
@@ -155,36 +141,31 @@ export async function createNewLeadFollowUps(leadId, temperatura) {
   };
   const days = schedules[temperatura] || schedules.MORNO;
 
-  // Fetch templates by cadence_day
-  let templates = [];
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/follow_up_templates?is_active=eq.true&select=*`, { headers });
-    templates = await r.json();
-    if (!Array.isArray(templates)) templates = [];
-  } catch (e) { /* continue without templates */ }
+    const { data: templates } = await supabase
+      .from('follow_up_templates')
+      .select('*')
+      .eq('is_active', true);
 
-  for (const day of days) {
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + day);
-    dueDate.setHours(10, 0, 0, 0);
+    const activeTemplates = Array.isArray(templates) ? templates : [];
 
-    const tpl = templates.find(t => t.cadence_day === day);
+    for (const day of days) {
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + day);
+      dueDate.setHours(10, 0, 0, 0);
 
-    try {
-      await fetch(`${SB_URL}/rest/v1/follow_ups`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          lead_uuid: leadId,
-          type: tpl?.type || 'followup',
-          template_key: tpl?.key || null,
-          status: 'pendente',
-          due_date: dueDate.toISOString(),
-          message_text: tpl?.message_text || `Olá! Tudo bem? Gostaria de saber se posso ajudar com alguma informação sobre imóveis.`,
-        }),
+      const tpl = activeTemplates.find(t => t.cadence_day === day);
+
+      await supabase.from('follow_ups').insert({
+        lead_uuid: leadId,
+        type: tpl?.type || 'followup',
+        template_key: tpl?.key || null,
+        status: 'pendente',
+        due_date: dueDate.toISOString(),
+        message_text: tpl?.message_text || `Olá! Tudo bem? Gostaria de saber se posso ajudar com alguma informação sobre imóveis.`,
       });
-    } catch (e) {
-      console.error('createNewLeadFollowUps error:', e);
     }
+  } catch (e) {
+    console.error('createNewLeadFollowUps error:', e);
   }
 }

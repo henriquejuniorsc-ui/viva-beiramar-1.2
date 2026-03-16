@@ -342,17 +342,19 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
   const handleDrop = async (e, newStage) => {
     e.preventDefault();
     setDragOverStage(null);
-    if (!draggedLead || draggedLead.stage === newStage) return;
 
-    const oldStage = draggedLead.stage;
-    const lead = draggedLead;
+    const leadId = e.dataTransfer.getData('text/plain');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead || lead.stage === newStage) return;
+
+    const oldStage = lead.stage;
 
     // Optimistic update
     updateLead({ ...lead, stage: newStage });
 
     // Sync: update DB + deal + auto follow-up
     const { onLeadStageChange } = await import('./hooks/useSyncLeadStage.js');
-    const result = await onLeadStageChange(lead, newStage, oldStage);
+    const result = await onLeadStageChange(supabase, lead, newStage, oldStage);
 
     if (result.updatedLead) {
       updateLead(result.updatedLead);
@@ -1716,7 +1718,7 @@ export default function App() {
       // non-visit completions still advance stage via old logic
       if (payload.lead_uuid) {
         import('./hooks/useSyncLeadStage.js').then(async ({ onAppointmentCompleted }) => {
-          const updatedLead = await onAppointmentCompleted(payload);
+          const updatedLead = await onAppointmentCompleted(supabase, payload);
           if (updatedLead) {
             setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
             setToast({ message: `${updatedLead.name} avançou para "${updatedLead.stage}"`, type: 'success' });
