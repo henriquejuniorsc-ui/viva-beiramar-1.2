@@ -1,0 +1,14 @@
+{
+  "name": "Viva Beiramar",
+  "short_name": "Viva Beiramar",
+  "description": "Painel imobiliário inteligente",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1B2B3A",
+  "background_color": "#1B2B3A",
+  "icons": [
+    { "src": "/logo-viva-beiramar.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/logo-viva-beiramar.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}
