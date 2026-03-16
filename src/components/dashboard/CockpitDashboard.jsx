@@ -703,6 +703,42 @@ const SB = 'https://hcmpjrqpjohksoznoycq.supabase.co';
 const SBK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbXBqcnFwam9oa3Nvem5veWNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5OTk0NjAsImV4cCI6MjA4ODU3NTQ2MH0.XRWi4ZULpICkTucXgGVQCP5wq1RmVwOFWTdMrOEMDnw';
 const sbh = { apikey: SBK, Authorization: `Bearer ${SBK}` };
 
+async function createFakeLeads(session) {
+  if (!session?.user?.id) return alert('Sessão expirada');
+  const userId = session.user.id;
+  const leads = [
+    { name: 'Ricardo Almeida', phone: '12997441020', email: 'ricardo@email.com', source: 'ZAP Imóveis', stage: 'Novo Lead', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Patrícia Rocha', phone: '11988223344', email: 'patricia@email.com', source: 'VivaReal', stage: 'Agendamento', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Felipe Mendes', phone: '12991112233', email: 'felipe@email.com', source: 'Instagram', stage: 'Visita', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Juliana Costa', phone: '11977665544', email: 'juliana@email.com', source: 'Site Próprio', stage: 'Proposta', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Marcos Oliveira', phone: '13996655443', email: 'marcos@email.com', source: 'OLX', stage: 'Fechado', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Letícia Souza', phone: '11955443322', email: 'leticia@email.com', source: 'Facebook', stage: 'Novo Lead', temperatura: 'FRIO', assigned_to: userId },
+    { name: 'Bruno Santos', phone: '12988776655', email: 'bruno@email.com', source: 'Indicação', stage: 'Agendamento', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Camila Ferreira', phone: '11944332211', email: 'camila@email.com', source: 'ZAP Imóveis', stage: 'Visita', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Rodrigo Lima', phone: '13988990011', email: 'rodrigo@email.com', source: 'Google Ads', stage: 'Proposta', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Beatriz Gomes', phone: '11911223344', email: 'beatriz@email.com', source: 'VivaReal', stage: 'Novo Lead', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Thiago Martins', phone: '12977445566', email: 'thiago@email.com', source: 'Instagram', stage: 'Agendamento', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Amanda Rocha', phone: '11988997766', email: 'amanda@email.com', source: 'Site Próprio', stage: 'Visita', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Gustavo Lima', phone: '13999887766', email: 'gustavo@email.com', source: 'OLX', stage: 'Documentação', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Heloísa Silva', phone: '11944556677', email: 'heloisa@email.com', source: 'Facebook', stage: 'Novo Lead', temperatura: 'FRIO', assigned_to: userId },
+    { name: 'Daniel Alves', phone: '12911224455', email: 'daniel@email.com', source: 'Indicação', stage: 'Fechado', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Isabela Castro', phone: '11922334455', email: 'isabela@email.com', source: 'ZAP Imóveis', stage: 'Agendamento', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Gabriel Machado', phone: '13977889900', email: 'gabriel@email.com', source: 'Google Ads', stage: 'Novo Lead', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Larissa Nunes', phone: '11933445566', email: 'larissa@email.com', source: 'VivaReal', stage: 'Visita', temperatura: 'QUENTE', assigned_to: userId },
+    { name: 'Vinícius Rocha', phone: '12999001122', email: 'vinicius@email.com', source: 'Instagram', stage: 'Proposta', temperatura: 'MORNO', assigned_to: userId },
+    { name: 'Fernanda Lima', phone: '11955667788', email: 'fernanda@email.com', source: 'Site Próprio', stage: 'Novo Lead', temperatura: 'FRIO', assigned_to: userId }
+  ];
+
+  for (const lead of leads) {
+    await fetch(`${SB}/rest/v1/crm_leads`, {
+      method: 'POST',
+      headers: { ...sbh, 'Content-Type': 'application/json' },
+      body: JSON.stringify(lead)
+    });
+  }
+  window.location.reload();
+}
+
 function getWeekRange() {
   const now = new Date();
   const dow = now.getDay(); // 0=sun
@@ -962,11 +998,19 @@ export default function CockpitDashboard({ session, onNavigate }) {
       )}
 
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Cockpit do Corretor</h1>
-        <p className="text-sm text-gray-400 mt-0.5">
-          {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Cockpit do Corretor</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
+        </div>
+        <button
+          onClick={() => createFakeLeads(session)}
+          className="px-4 py-2 text-xs font-bold bg-amber-100 text-amber-700 rounded-xl hover:bg-amber-200 transition-colors flex items-center gap-2"
+        >
+          🚀 Gerar 20 Leads
+        </button>
       </div>
 
       {error && (
