@@ -441,12 +441,12 @@ export default function App() {
       onClick={() => { setCurrentRoute(route); setIsMobileMenuOpen(false); }}
       className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-medium ${currentRoute === route ? 'bg-[rgba(196,162,101,0.1)] text-[#C4A265]' : 'text-[#94A3B8] hover:text-white hover:bg-white/5'}`}
     >
-      <div className="flex items-center space-x-3 relative">
-        <Icon className="w-5 h-5" />
-        <span>{label}</span>
+      <div className="flex items-center space-x-3 relative min-w-0">
+        <Icon className="w-5 h-5 flex-shrink-0" />
+        <span className="truncate">{label}</span>
         {alert && <span className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-[#C4A265] rounded-full animate-pulse border-2 border-[#1B2B3A]"></span>}
       </div>
-      {badge > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{badge}</span>}
+      {badge > 0 && <span className="flex-shrink-0 ml-1 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{badge}</span>}
     </button>
   );
 
