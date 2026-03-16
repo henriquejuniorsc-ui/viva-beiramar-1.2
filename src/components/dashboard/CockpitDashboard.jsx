@@ -36,7 +36,7 @@ const SkeletonDark = ({ w = 'w-full', h = 'h-4' }) => (
 
 // --- Bloco 1: Previsão Principal ---
 function CommissionForecast({ prediction, isLoading }) {
-  if (isLoading) return (
+  if (isLoading || !prediction) return (
     <div className="bg-gradient-to-br from-[#1B2B3A] to-[#0F1922] rounded-2xl p-6 md:p-8 min-h-[calc(100dvh-56px)] md:min-h-0 flex flex-col justify-center">
       <SkeletonDark w="w-40" h="h-4" />
       <div className="mt-3"><SkeletonDark w="w-56" h="h-12" /></div>
@@ -168,7 +168,7 @@ function DealActionCard({ deal }) {
 }
 
 function ActionableDeals({ prediction, isLoading }) {
-  if (isLoading) return (
+  if (isLoading || !prediction) return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-3 animate-pulse">
       <Skeleton w="w-56" h="h-5" />
       <Skeleton w="w-40" h="h-4" />
