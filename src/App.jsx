@@ -5,6 +5,14 @@ import ComissoesPage from './components/comissoes/Comissoes';
 import AdminImoveis from './components/imoveis/AdminImoveis';
 import ConversasPage from './components/conversas/ConversasPage';
 import RelatoriosPage from './components/relatorios/RelatoriosPage';
+import CelebrationScreen from './components/crm/CelebrationScreen';
+import VisitRegistrationModal from './components/agenda/VisitRegistrationModal';
+import { saveVisitRegistration } from './hooks/useVisitRegistration';
+import { registerAction } from './hooks/useStreak';
+import { RequestReferralModal, RegisterReferralModal } from './components/crm/ReferralModals';
+import BadgesPage from './components/crm/BadgesPage';
+import BadgeCelebration from './components/crm/BadgeCelebration';
+import { checkAndUnlockBadges } from './hooks/useBadges';
 import { useGoogleCalendar } from './hooks/useGoogleCalendar';
 import {
   LayoutDashboard, Home, Users, Settings, LogOut, Search, Plus,
@@ -12,7 +20,7 @@ import {
   ChevronRight, Edit2, Trash2, Image as ImageIcon, Phone, Mail,
   User, Calendar, DollarSign, ArrowRight, Menu, Loader2, UploadCloud,
   MessageSquare, Send, Paperclip, Smile, MoreVertical, CheckCheck, Clock, RefreshCw, Info, PhoneForwarded,
-  CalendarDays, ChevronLeft, Calendar as CalendarIcon, MapIcon, AlignLeft, Bell, BarChart3
+  CalendarDays, ChevronLeft, Calendar as CalendarIcon, MapIcon, AlignLeft, Bell, BarChart3, CheckCircle2, HeartHandshake, UserPlus, Trophy
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip,
@@ -115,24 +123,29 @@ const Button = ({ children, variant = 'primary', className = '', isLoading, ...p
 };
 
 let toastTimeout;
-const Toast = ({ message, type, onClose, action, actionLabel }) => {
+const Toast = ({ message, type, subtitle, onClose, action, actionLabel }) => {
   if (!message) return null;
   const types = {
     success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
     error: 'bg-red-50 text-red-800 border-red-200',
     info: 'bg-blue-50 text-blue-800 border-blue-200',
-    warning: 'bg-amber-50 text-amber-800 border-amber-200'
+    warning: 'bg-amber-50 text-amber-800 border-amber-200',
+    pipeline: 'bg-white text-gray-900 border-gray-200 shadow-xl',
+    lost: 'bg-gray-50 text-gray-700 border-gray-200',
   };
   return (
-    <div className={`fixed bottom-4 right-4 z-[9999] flex items-center p-4 rounded-xl border shadow-lg transition-all transform animate-slide-in ${types[type] || types.info}`}>
-      <span className="font-medium mr-3">{message}</span>
+    <div className={`fixed bottom-4 right-4 z-[9999] flex items-start p-4 rounded-xl border shadow-lg toast-slide-in ${types[type] || types.info}`}>
+      <div className="flex-1 mr-3">
+        <span className="font-medium block">{message}</span>
+        {subtitle && <span className="text-xs opacity-70 mt-0.5 block">{subtitle}</span>}
+      </div>
       {action && (
         <button onClick={() => { action(); onClose(); }}
-          className="px-3 py-1 bg-[#C4A265] text-white text-xs rounded-lg font-medium mr-2 hover:bg-[#b89355]">
+          className="px-3 py-1 bg-[#C4A265] text-white text-xs rounded-lg font-medium mr-2 hover:bg-[#b89355] flex-shrink-0">
           {actionLabel || 'Ação'}
         </button>
       )}
-      <button onClick={onClose} className="p-1 hover:bg-black/5 rounded-full"><X className="w-4 h-4" /></button>
+      <button onClick={onClose} className="p-1 hover:bg-black/5 rounded-full flex-shrink-0"><X className="w-4 h-4" /></button>
     </div>
   );
 };
@@ -211,6 +224,44 @@ const Dashboard = ({ leads, properties, appointments }) => {
   );
 };
 
+// Urgency helper for kanban cards — T12
+function getUrgencyStyle(updatedAt) {
+  if (!updatedAt) return { borderLeft: '', label: null, color: '', pulse: false, level: 'unknown', pulseCls: '' };
+  const days = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 86400000);
+  if (days >= 7) return {
+    borderLeft: '4px solid #EF4444',
+    label: `${days}d sem contato`,
+    color: '#EF4444',
+    pulse: true,
+    level: 'critico',
+    pulseCls: 'animate-pulse-border',
+  };
+  if (days >= 3) return {
+    borderLeft: '4px solid #F59E0B',
+    label: `${days}d sem contato`,
+    color: '#F59E0B',
+    pulse: false,
+    level: 'risco',
+    pulseCls: '',
+  };
+  if (days >= 1) return {
+    borderLeft: '4px solid #D1D5DB',
+    label: `${days}d atrás`,
+    color: '#9CA3AF',
+    pulse: false,
+    level: 'ok',
+    pulseCls: '',
+  };
+  return {
+    borderLeft: '',
+    label: 'Hoje',
+    color: '#10B981',
+    pulse: false,
+    level: 'recente',
+    pulseCls: '',
+  };
+}
+
 // 2. CRM / LEADS (enriched with pipeline_deals + drag-and-drop + sync)
 const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaModal }) => {
   const [view, setView] = useState('kanban');
@@ -220,6 +271,7 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
   const [dealModal, setDealModal] = useState(null);
   const [draggedLead, setDraggedLead] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
+  const [celebrationData, setCelebrationData] = useState(null); // { deal, lead }
 
   // Fetch deals
   useEffect(() => {
@@ -241,6 +293,18 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
       } catch (e) { console.error('CRM deals fetch:', e); }
     })();
   }, []);
+
+  // T12: Update lead updated_at to reset the "days without contact" counter
+  const updateLeadTimestamp = useCallback(async (leadId) => {
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/crm_leads?id=eq.${leadId}`, {
+        method: 'PATCH',
+        headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ updated_at: new Date().toISOString() }),
+      });
+      updateLead({ id: leadId, updated_at: new Date().toISOString() }); // optimistic
+    } catch (e) { console.warn('updateLeadTimestamp failed', e); }
+  }, [updateLead]);
 
   const getDealForLead = useCallback((lead) => {
     return deals.find(d => d.lead_uuid && d.lead_uuid === lead.id) || null;
@@ -294,22 +358,64 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
       updateLead(result.updatedLead);
     }
 
-    // Suggest agenda if moved to "Visita Agendada"
-    if (result.shouldSuggestAgenda) {
+    // 🎉 Celebration when moved to "Fechado" and lead has a deal
+    if (newStage === 'Fechado') {
+      const existingDeal = getDealForLead(lead);
+      if (existingDeal) {
+        registerAction('deal_closed', lead.id).catch(() => {});
+        // T21: check badges async (fire-and-forget, show celebrations)
+        checkAndUnlockBadges().then(newly => {
+          if (newly.length > 0) setNewBadgeQueue(q => [...q, ...newly]);
+        }).catch(() => {});
+        setCelebrationData({ deal: existingDeal, lead });
+        return; // skip other toasts
+      }
+    }
+
+    // Register action for proposal (Documentação) + streak toast
+    if (newStage === 'Documentação') {
+      registerAction('proposal_sent', lead.id).then(res => {
+        if (res && res.newStreak > res.prevStreak) {
+          const msg = res.isNewRecord
+            ? `🏆 Novo recorde! ${res.newStreak} dias consecutivos!`
+            : `🔥 ${res.newStreak} dias! Streak mantido!`;
+          setToast({ message: msg, type: 'success' });
+        }
+      }).catch(() => {});
+    }
+
+    // T14: Toast rico ao mover lead
+    const deal = getDealForLead(lead);
+    if (newStage === 'Perdido') {
+      // Motivational toast — not sad
+      setToast({
+        message: '😤 Perdeu essa. Próximo!',
+        subtitle: 'Bora pra próxima oportunidade 💪',
+        type: 'lost',
+      });
+    } else if (result.shouldSuggestAgenda) {
       setToast({
         message: `📅 Deseja agendar uma visita com ${lead.name}?`,
         type: 'info',
         action: () => openAgendaModal({
-          lead_id: lead.id,
-          lead_uuid: lead.id,
-          lead_name: lead.name,
-          lead_phone: lead.phone,
-          appointment_type: 'visita',
+          lead_id: lead.id, lead_uuid: lead.id, lead_name: lead.name,
+          lead_phone: lead.phone, appointment_type: 'visita',
         }),
         actionLabel: 'Agendar',
       });
+    } else if (deal && deal.deal_value > 0) {
+      // Pipeline value toast
+      const fmtVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(deal.deal_value);
+      setToast({
+        message: `📈 +${fmtVal} no pipeline!`,
+        subtitle: `${lead.name} → ${newStage === 'Novo Lead' ? 'Novo Contato' : newStage}`,
+        type: 'pipeline',
+      });
     } else {
-      setToast({ message: `${lead.name} movido para ${newStage}`, type: 'success' });
+      setToast({
+        message: `${lead.name} movido para ${newStage === 'Novo Lead' ? 'Novo Contato' : newStage}`,
+        type: 'success',
+      });
     }
   };
 
@@ -317,13 +423,14 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
   const saveDeal = async (leadId, dealData, existingDealId) => {
     try {
       const hdrs = { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', Prefer: 'return=representation' };
-      const lead = leads.find(l => l.id === leadId);
+      const leadObj = leads.find(l => l.id === leadId);
       // Only send columns that exist in pipeline_deals
       const { property_title, property_neighborhood, property_price, ...cleanData } = dealData;
       const body = {
         ...cleanData,
         lead_uuid: leadId,
         commission_value: (Number(dealData.deal_value) || 0) * (Number(dealData.commission_rate) || 0) / 100,
+        ...(dealData.status === 'fechado' ? { closed_at: new Date().toISOString() } : {}),
       };
       let result;
       if (existingDealId) {
@@ -338,10 +445,26 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
         result = await r.json();
       }
       if (Array.isArray(result) && result[0]) {
+        const savedDeal = {
+          ...result[0],
+          property_title: dealData.property_title || '',
+          property_neighborhood: dealData.property_neighborhood || '',
+        };
         setDeals(prev => {
-          const f = prev.filter(d => d.id !== result[0].id);
-          return [...f, result[0]];
+          const f = prev.filter(d => d.id !== savedDeal.id);
+          return [...f, savedDeal];
         });
+
+        // 🎉 Celebration when deal status set to fechado
+        if (dealData.status === 'fechado' && savedDeal.deal_value) {
+          setDealModal(null);
+          setCelebrationData({ deal: savedDeal, lead: leadObj });
+          // T21: check badges async
+          checkAndUnlockBadges().then(newly => {
+            if (newly.length > 0) setNewBadgeQueue(q => [...q, ...newly]);
+          }).catch(() => {});
+          return; // skip regular toast
+        }
       }
       setToast({ message: 'Negócio salvo!', type: 'success' });
       setDealModal(null);
@@ -366,7 +489,7 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
         <div className="flex items-center space-x-3 w-full md:w-auto">
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A8A8A]" />
-            <input type="text" placeholder="Buscar leads..." value={searchTerm}
+            <input type="text" placeholder="Buscar oportunidade..." value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-lg border border-[#E8E2D8] bg-white text-sm focus:ring-2 focus:ring-[#C4A265] outline-none" />
           </div>
@@ -385,7 +508,7 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                 <ChevronLeft className="w-5 h-5 text-[#1B2B3A]" />
               </button>
               <div className="text-center">
-                <span className="font-semibold text-[#1B2B3A] text-sm">{KANBAN_STAGES[mobileStageIdx]}</span>
+                <span className="font-semibold text-[#1B2B3A] text-sm">{KANBAN_STAGES[mobileStageIdx] === 'Novo Lead' ? 'Novo Contato' : KANBAN_STAGES[mobileStageIdx]}</span>
                 <span className="ml-2 text-xs text-[#8A8A8A]">({filteredLeads.filter(l => l.stage === KANBAN_STAGES[mobileStageIdx]).length})</span>
                 {(() => {
                   const sum = filteredLeads.filter(l => l.stage === KANBAN_STAGES[mobileStageIdx]).reduce((s, l) => {
@@ -409,9 +532,11 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {filteredLeads.filter(l => l.stage === KANBAN_STAGES[mobileStageIdx]).map(lead => {
                 const deal = getDealForLead(lead);
+                const urgency = getUrgencyStyle(lead.updated_at);
                 return (
                   <div key={lead.id}
                     className="bg-white p-4 rounded-xl shadow-sm border border-[#E8E2D8]"
+                    style={{ borderLeft: urgency.borderLeft }}
                     onClick={() => setDealModal({ lead, deal })}>
                     <div className="flex justify-between items-start mb-2">
                       <h4 className="font-bold text-[#1B2B3A] text-sm">{lead.name}</h4>
@@ -419,22 +544,46 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                     </div>
                     {deal ? (
                       <div className="mb-2 space-y-1">
-                        {deal.property_title && <p className="text-[11px] text-[#5A5A5A]">{deal.property_title}</p>}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-[#C4A265]">{formatCurrency(deal.deal_value)}</span>
+                        {deal.property_title && <p className="text-[11px] text-[#5A5A5A] truncate">{deal.property_title}</p>}
+                        {/* T12: show COMMISSION as primary value */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {deal.commission_value > 0 ? (
+                            <span className="text-xs font-bold text-[#1D9E75]">R$ {Math.round(deal.commission_value).toLocaleString('pt-BR')} com.</span>
+                          ) : (
+                            <span className="text-xs font-bold text-[#C4A265]">{formatCurrency(deal.deal_value)}</span>
+                          )}
                           {deal.probability != null && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${deal.probability >= 70 ? 'bg-green-50 text-green-700' : deal.probability >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>{deal.probability}%</span>}
                         </div>
                       </div>
                     ) : (
                       <p className="text-xs text-[#5A5A5A] mb-2"><Phone className="w-3 h-3 inline mr-1" />{formatPhone(lead.phone)}</p>
                     )}
-                    <div className="flex gap-2 pt-2 border-t border-[#E8E2D8]">
+                    {/* T12: urgency row */}
+                    {urgency.label && (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        {urgency.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                        <span className="text-[10px] font-medium" style={{ color: urgency.color }}>⏰ {urgency.label}</span>
+                      </div>
+                    )}
+                    {/* T12: Agir agora button for urgent / at-risk */}
+                    {(urgency.level === 'critico' || urgency.level === 'risco') && lead.phone && (
+                      <a
+                        href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
+                        target="_blank" rel="noopener noreferrer"
+                        onClick={e => { e.stopPropagation(); updateLeadTimestamp(lead.id); }}
+                        className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors ${
+                          urgency.level === 'critico' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                        }`}>
+                        <MessageSquare className="w-3 h-3" /> Agir agora
+                      </a>
+                    )}
+                    <div className="flex gap-2 pt-2 mt-1 border-t border-[#E8E2D8]">
                       <Button variant="outlineGray" className="flex-1 py-2 text-xs" onClick={(e) => { e.stopPropagation(); openAgendaModal({ lead_id: lead.id, lead_uuid: lead.id, lead_name: lead.name, lead_phone: lead.phone }); }}>
                         <CalendarDays className="w-3 h-3 mr-1" /> Agendar
                       </Button>
                       {lead.phone && (
                         <a href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
+                          onClick={e => { e.stopPropagation(); updateLeadTimestamp(lead.id); }}
                           className="flex-1 py-2 text-xs font-medium inline-flex items-center justify-center rounded-lg border border-[#25D366] text-[#25D366] hover:bg-[#25D366] hover:text-white transition-colors">
                           <MessageSquare className="w-3 h-3 mr-1" /> WhatsApp
                         </a>
@@ -444,7 +593,7 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                 );
               })}
               {filteredLeads.filter(l => l.stage === KANBAN_STAGES[mobileStageIdx]).length === 0 && (
-                <p className="text-center text-sm text-[#8A8A8A] py-8">Nenhum lead nesta etapa</p>
+                <p className="text-center text-sm text-[#8A8A8A] py-8">Nenhuma oportunidade aqui</p>
               )}
             </div>
           </div>
@@ -465,7 +614,7 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                   onDrop={(e) => handleDrop(e, stage)}>
                   <div className="p-3 border-b border-[#E8E2D8]/50">
                     <div className="flex justify-between items-center">
-                      <span className="font-semibold text-[#1B2B3A] text-sm">{stage}</span>
+                      <span className="font-semibold text-[#1B2B3A] text-sm">{stage === 'Novo Lead' ? 'Novo Contato' : stage}</span>
                       <span className="bg-white text-xs px-2 py-0.5 rounded-full text-[#8A8A8A]">{stageLeads.length}</span>
                     </div>
                     {stageDealsSum > 0 && (
@@ -475,56 +624,82 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                   <div className="p-3 overflow-y-auto flex-1 space-y-3 custom-scrollbar">
                     {stageLeads.map(lead => {
                       const deal = getDealForLead(lead);
+                      const urgency = getUrgencyStyle(lead.updated_at);
                       return (
                         <div key={lead.id}
                           draggable
                           onDragStart={(e) => handleDragStart(e, lead)}
                           onDragEnd={handleDragEnd}
                           className="bg-white p-4 rounded-xl shadow-sm border border-[#E8E2D8] hover:border-[#C4A265] transition-colors group cursor-grab active:cursor-grabbing"
+                          style={{ borderLeft: urgency.borderLeft }}
                           onClick={() => setDealModal({ lead, deal })}>
                           <div className="flex justify-between items-start mb-1">
                             <h4 className="font-bold text-[#1B2B3A] text-sm">{lead.name}</h4>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${TEMP_COLORS[lead.temperatura] || 'bg-slate-200 text-slate-800'}`}>{lead.temperatura}</span>
                           </div>
-                          {deal && (
-                            <div className="mb-2 space-y-1">
-                              {deal.property_title && (
-                                <p className="text-[11px] text-[#5A5A5A] truncate">
-                                  {deal.property_title}{deal.property_neighborhood ? ` — ${deal.property_neighborhood}` : ''}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-2">
+                        {deal && (
+                          <div className="mb-2 space-y-1">
+                            {deal.property_title && (
+                              <p className="text-[11px] text-[#5A5A5A] truncate">
+                                {deal.property_title}{deal.property_neighborhood ? ` — ${deal.property_neighborhood}` : ''}
+                              </p>
+                            )}
+                            {/* T12: commission first */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {deal.commission_value > 0 ? (
+                                <span className="text-xs font-bold text-[#1D9E75]">R$ {Math.round(deal.commission_value).toLocaleString('pt-BR')} com.</span>
+                              ) : (
                                 <span className="text-xs font-bold text-[#C4A265]">{formatCurrency(deal.deal_value)}</span>
-                                {deal.commission_value > 0 && (
-                                  <span className="text-[10px] text-green-600">Com. {formatCurrency(deal.commission_value)}</span>
-                                )}
-                              </div>
-                              {deal.probability != null && (
-                                <div className="flex items-center gap-1.5">
-                                  <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full ${deal.probability >= 70 ? 'bg-green-500' : deal.probability >= 40 ? 'bg-amber-400' : 'bg-gray-300'}`}
-                                      style={{ width: `${deal.probability}%` }} />
-                                  </div>
-                                  <ProbBadge prob={deal.probability} />
-                                </div>
+                              )}
+                              {deal.commission_value > 0 && (
+                                <span className="text-[10px] text-gray-400">{formatCurrency(deal.deal_value)}</span>
                               )}
                             </div>
-                          )}
-                          {!deal && (
-                            <p className="text-xs text-[#5A5A5A] mb-2 flex items-center">
-                              <Phone className="w-3 h-3 mr-1" /> {formatPhone(lead.phone)}
-                            </p>
-                          )}
-                          <div className="flex items-center space-x-2 pt-2 border-t border-[#E8E2D8]">
-                            <Button variant="outlineGray" className="flex-1 py-1 text-xs" onClick={(e) => { e.stopPropagation(); openAgendaModal({ lead_id: lead.id, lead_uuid: lead.id, lead_name: lead.name, lead_phone: lead.phone }); }}>
-                              <CalendarDays className="w-3 h-3 mr-1" /> Agendar
-                            </Button>
-                            {!deal && (
-                              <Button variant="outlineGray" className="flex-1 py-1 text-xs" onClick={(e) => { e.stopPropagation(); setDealModal({ lead, deal: null }); }}>
-                                <DollarSign className="w-3 h-3 mr-1" /> Negócio
-                              </Button>
+                            {deal.probability != null && (
+                              <div className="flex items-center gap-1.5">
+                                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${deal.probability >= 70 ? 'bg-green-500' : deal.probability >= 40 ? 'bg-amber-400' : 'bg-gray-300'}`}
+                                    style={{ width: `${deal.probability}%` }} />
+                                </div>
+                                <ProbBadge prob={deal.probability} />
+                              </div>
                             )}
                           </div>
+                        )}
+                        {!deal && (
+                          <p className="text-xs text-[#5A5A5A] mb-2 flex items-center">
+                            <Phone className="w-3 h-3 mr-1" /> {formatPhone(lead.phone)}
+                          </p>
+                        )}
+                        {/* T12: urgency row */}
+                        {urgency.label && (
+                          <div className="flex items-center gap-1.5 mt-1.5">
+                            {urgency.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                            <span className="text-[10px] font-medium" style={{ color: urgency.color }}>⏰ {urgency.label}</span>
+                          </div>
+                        )}
+                        {/* T12: Agir agora for urgent leads */}
+                        {(urgency.level === 'critico' || urgency.level === 'risco') && lead.phone && (
+                          <a
+                            href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
+                            target="_blank" rel="noopener noreferrer"
+                            onClick={e => { e.stopPropagation(); updateLeadTimestamp(lead.id); }}
+                            className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold text-white transition-colors ${
+                              urgency.level === 'critico' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                            }`}>
+                            <MessageSquare className="w-3 h-3" /> Agir agora
+                          </a>
+                        )}
+                        <div className="flex items-center space-x-2 pt-2 mt-1 border-t border-[#E8E2D8]">
+                          <Button variant="outlineGray" className="flex-1 py-1 text-xs" onClick={(e) => { e.stopPropagation(); openAgendaModal({ lead_id: lead.id, lead_uuid: lead.id, lead_name: lead.name, lead_phone: lead.phone }); }}>
+                            <CalendarDays className="w-3 h-3 mr-1" /> Agendar
+                          </Button>
+                          {!deal && (
+                            <Button variant="outlineGray" className="flex-1 py-1 text-xs" onClick={(e) => { e.stopPropagation(); setDealModal({ lead, deal: null }); }}>
+                              <DollarSign className="w-3 h-3 mr-1" /> Negócio
+                            </Button>
+                          )}
+                        </div>
                         </div>
                       );
                     })}
@@ -549,24 +724,44 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
                   <th className="text-left px-4 py-3 text-xs font-medium text-[#8A8A8A]">Telefone</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[#8A8A8A]">Etapa</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[#8A8A8A]">Temp.</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-[#8A8A8A]">Valor</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[#8A8A8A]">Com.</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[#8A8A8A]">Imóvel</th>
                   <th className="text-center px-4 py-3 text-xs font-medium text-[#8A8A8A]">Prob.</th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-[#8A8A8A]">Último contato</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredLeads.map(lead => {
                   const deal = getDealForLead(lead);
+                  const urgency = getUrgencyStyle(lead.updated_at);
                   return (
-                    <tr key={lead.id} className="border-b border-[#E8E2D8] last:border-0 hover:bg-gray-50 cursor-pointer"
+                    <tr key={lead.id}
+                      className={`border-b border-[#E8E2D8] last:border-0 hover:bg-gray-50 cursor-pointer ${
+                        urgency.level === 'critico' ? 'bg-red-50/40' : urgency.level === 'risco' ? 'bg-amber-50/30' : ''
+                      } ${urgency.pulseCls}`}
+                      style={urgency.borderLeft ? { borderLeft: urgency.borderLeft } : {}}
                       onClick={() => setDealModal({ lead, deal })}>
                       <td className="px-4 py-3 font-medium text-[#1B2B3A]">{lead.name}</td>
                       <td className="px-4 py-3 text-[#5A5A5A]">{formatPhone(lead.phone)}</td>
-                      <td className="px-4 py-3"><span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{lead.stage}</span></td>
+                      <td className="px-4 py-3"><span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{lead.stage === 'Novo Lead' ? 'Novo Contato' : lead.stage}</span></td>
                       <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${TEMP_COLORS[lead.temperatura] || 'bg-slate-200 text-slate-800'}`}>{lead.temperatura}</span></td>
-                      <td className="px-4 py-3 text-right text-[#C4A265] font-medium">{deal ? formatCurrency(deal.deal_value) : '—'}</td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {deal ? (
+                          deal.commission_value > 0
+                            ? <span className="text-[#1D9E75]">R$ {Math.round(deal.commission_value).toLocaleString('pt-BR')}</span>
+                            : <span className="text-[#C4A265]">{formatCurrency(deal.deal_value)}</span>
+                        ) : '—'}
+                      </td>
                       <td className="px-4 py-3 text-[#5A5A5A] truncate max-w-[200px]">{deal?.property_title || '—'}</td>
                       <td className="px-4 py-3 text-center">{deal?.probability != null ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${deal.probability >= 70 ? 'bg-green-50 text-green-700' : deal.probability >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>{deal.probability}%</span> : '—'}</td>
+                      <td className="px-4 py-3 text-center">
+                        {urgency.label && (
+                          <span className="text-xs font-medium" style={{ color: urgency.color }}>
+                            {urgency.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1" />}
+                            {urgency.label}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -577,14 +772,31 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
             <div className="md:hidden divide-y divide-[#E8E2D8]">
               {filteredLeads.map(lead => {
                 const deal = getDealForLead(lead);
+                const urgency = getUrgencyStyle(lead.updated_at);
                 return (
-                  <div key={lead.id} className="p-4 hover:bg-gray-50" onClick={() => setDealModal({ lead, deal })}>
+                  <div key={lead.id}
+                    className="p-4 hover:bg-gray-50"
+                    style={urgency.borderLeft ? { borderLeft: urgency.borderLeft } : {}}
+                    onClick={() => setDealModal({ lead, deal })}>
                     <div className="flex justify-between items-start mb-1">
                       <span className="font-medium text-[#1B2B3A] text-sm">{lead.name}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${TEMP_COLORS[lead.temperatura] || 'bg-slate-200 text-slate-800'}`}>{lead.temperatura}</span>
                     </div>
-                    <p className="text-xs text-[#8A8A8A]">{formatPhone(lead.phone)} · {lead.stage}</p>
-                    {deal && <p className="text-xs text-[#C4A265] font-medium mt-1">{formatCurrency(deal.deal_value)} · {deal.property_title}</p>}
+                    <p className="text-xs text-[#8A8A8A]">{formatPhone(lead.phone)} · {lead.stage === 'Novo Lead' ? 'Novo Contato' : lead.stage}</p>
+                    {deal && (
+                      <p className="text-xs font-medium mt-1">
+                        {deal.commission_value > 0
+                          ? <span className="text-[#1D9E75]">R$ {Math.round(deal.commission_value).toLocaleString('pt-BR')} com.</span>
+                          : <span className="text-[#C4A265]">{formatCurrency(deal.deal_value)}</span>}
+                        {deal.property_title && <span className="text-[#8A8A8A]"> · {deal.property_title}</span>}
+                      </p>
+                    )}
+                    {urgency.label && (
+                      <p className="text-[10px] mt-1 font-medium" style={{ color: urgency.color }}>
+                        {urgency.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1" />}
+                        ⏰ {urgency.label}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -596,14 +808,23 @@ const CRM = ({ leads, properties, updateLead, setToast, reloadData, openAgendaMo
 
       {dealModal && (
         <DealModal lead={dealModal.lead} deal={dealModal.deal} properties={properties}
-          onClose={() => setDealModal(null)} onSave={saveDeal} />
+          onClose={() => setDealModal(null)} onSave={saveDeal}
+          setToast={setToast} onReferralSaved={() => reloadData && reloadData()} />
+      )}
+
+      {celebrationData && (
+        <CelebrationScreen
+          deal={celebrationData.deal}
+          lead={celebrationData.lead}
+          onClose={() => setCelebrationData(null)}
+        />
       )}
     </div>
   );
 };
 
 // Deal Modal — create/edit deal for a lead
-const DealModal = ({ lead, deal, properties, onClose, onSave }) => {
+const DealModal = ({ lead, deal, properties, onClose, onSave, setToast, onReferralSaved }) => {
   const [form, setForm] = useState({
     property_id: deal?.property_id || '',
     property_title: deal?.property_title || '',
@@ -617,6 +838,8 @@ const DealModal = ({ lead, deal, properties, onClose, onSave }) => {
     notes: deal?.notes || '',
   });
   const [saving, setSaving] = useState(false);
+  const [showReqReferral, setShowReqReferral] = useState(false);
+  const [showRegReferral, setShowRegReferral] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -654,6 +877,21 @@ const DealModal = ({ lead, deal, properties, onClose, onSave }) => {
           </div>
           <button onClick={onClose} className="p-2 hover:bg-[#E8E2D8] rounded-full"><X className="w-5 h-5" /></button>
         </div>
+
+        {/* --- T20: Área Pós-venda para leads Fechados --- */}
+        {lead.stage === 'Fechado' && !showReqReferral && !showRegReferral && (
+          <div className="p-4 bg-gradient-to-r from-[#FAF8F5] to-white border-b border-[#E8E2D8] flex gap-2">
+            <button type="button" onClick={() => setShowReqReferral(true)} className="flex-1 flex flex-col items-center justify-center gap-1.5 border-2 border-[#C4A265] text-[#C4A265] hover:bg-[#FAF8F5] rounded-xl text-[11px] font-bold min-h-[56px] px-2 transition-colors">
+              <HeartHandshake className="w-5 h-5" />
+              Pedir indicação
+            </button>
+            <button type="button" onClick={() => setShowRegReferral(true)} className="flex-1 flex flex-col items-center justify-center gap-1.5 border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 rounded-xl text-[11px] font-bold min-h-[56px] px-2 transition-colors">
+              <UserPlus className="w-5 h-5" />
+              Registrar indicação
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {/* Imóvel */}
           <div>
@@ -731,6 +969,9 @@ const DealModal = ({ lead, deal, properties, onClose, onSave }) => {
           </div>
         </form>
       </div>
+
+      {showReqReferral && <RequestReferralModal lead={lead} onClose={() => setShowReqReferral(false)} onSent={() => { setShowReqReferral(false); if (setToast) setToast({ message: 'Mensagem enviada com sucesso!', type: 'success' }); }} />}
+      {showRegReferral && <RegisterReferralModal lead={lead} properties={properties} onClose={() => setShowRegReferral(false)} onSaved={(newLead) => { setShowRegReferral(false); if (setToast) setToast({ message: 'Lead criado! Indicação de ' + lead.name, type: 'success' }); if (onReferralSaved) onReferralSaved(); }} />}
     </div>
   );
 };
@@ -845,7 +1086,7 @@ const SettingsPage = ({ uazConfig, setUazConfig, googleCal, setToast }) => {
 // 5. CONVERSAS — Movido para src/components/conversas/ConversasPage.jsx
 
 // 6. AGENDA
-const Agenda = ({ appointments, setAppointments, leads, properties, googleCal, openAgendaModal, setToast }) => {
+const Agenda = ({ appointments, setAppointments, leads, properties, googleCal, openAgendaModal, setToast, onCompleteVisit }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState(typeof window !== 'undefined' && window.innerWidth < 768 ? 'day' : 'month');
   const [filterType, setFilterType] = useState('Todos');
@@ -967,7 +1208,17 @@ const Agenda = ({ appointments, setAppointments, leads, properties, googleCal, o
                           {startDate.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})} - {endDate.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
                         </span>
                       </div>
-                      <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-2">
+                        {/* Concluir — only for visitas not yet completed */}
+                        {a.appointment_type === 'visita' && a.status !== 'concluido' && onCompleteVisit && (
+                          <button
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors min-h-[36px]"
+                            onClick={() => onCompleteVisit(a)}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Concluir
+                          </button>
+                        )}
                         <button className="p-1.5 text-[#8A8A8A] hover:text-[#C4A265]" onClick={() => openAgendaModal(a)}><Edit2 className="w-4 h-4" /></button>
                       </div>
                     </div>
@@ -1248,6 +1499,11 @@ export default function App() {
     deleteEvent: async () => {},
   }), []);
   const [agendaModalData, setAgendaModalData] = useState(null);
+  // T18: pós-visita — payload do agendamento aguardando registro
+  const [visitRegModalData, setVisitRegModalData] = useState(null);
+  // T21: fila de badges recém-desbloqueados para celebrar
+  const [newBadgeQueue, setNewBadgeQueue] = useState([]); // array of badge_keys
+  const [badgeDefs, setBadgeDefs] = useState({}); // badge_key -> badge object
 
   const [toast, setToastState] = useState(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -1256,6 +1512,21 @@ export default function App() {
     clearTimeout(toastTimeout);
     if(data) toastTimeout = setTimeout(() => setToastState(null), 4000);
   };
+
+  // 🔥 Streak wrapper — call this instead of bare registerAction to get toast feedback
+  const registerStreakAction = useCallback(async (actionType, leadId = null) => {
+    const result = await registerAction(actionType, leadId).catch(() => null);
+    if (!result) return;
+    const { newStreak, prevStreak, isNewRecord } = result;
+    // Only toast if streak actually incremented (not just total_actions)
+    if (newStreak > prevStreak) {
+      if (isNewRecord) {
+        setToast({ message: `🏆 Novo recorde! ${newStreak} dias consecutivos!`, type: 'success' });
+      } else {
+        setToast({ message: `🔥 ${newStreak} dias! Streak mantido!`, type: 'success' });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     addGoogleFonts();
@@ -1371,6 +1642,23 @@ export default function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // T21: On session load, check streak badges (máquina) and pre-load badge defs for celebrations
+  useEffect(() => {
+    if (!session) return;
+    // Pre-load badge defs so celebration modal has icon/name
+    import('./hooks/useBadges.js').then(({ fetchBadgeProgress }) => {
+      fetchBadgeProgress().then(badges => {
+        const map = {};
+        badges.forEach(b => { map[b.badge_key] = b; });
+        setBadgeDefs(map);
+      }).catch(() => {});
+    }).catch(() => {});
+    // Check streak-based badges on load
+    checkAndUnlockBadges().then(newly => {
+      if (newly.length > 0) setNewBadgeQueue(q => [...q, ...newly]);
+    }).catch(() => {});
+  }, [session]);
+
   const saveAppointment = async (payload) => {
     // Carry lead_uuid from lead_id if available
     if (payload.lead_id && !payload.lead_uuid) {
@@ -1380,18 +1668,53 @@ export default function App() {
     if (payload._delete) {
       setAppointments(prev => prev.filter(a => a.id !== payload.id));
       setToast({ message: 'Compromisso removido.', type: 'info' });
-    } else {
-      const isNew = !appointments.find(a => a.id === payload.id);
-      const wasNotCompleted = appointments.find(a => a.id === payload.id)?.status !== 'concluido';
-      if (isNew) {
-        setAppointments(prev => [...prev, payload]);
-      } else {
-        setAppointments(prev => prev.map(a => a.id === payload.id ? payload : a));
-      }
-      setToast({ message: 'Agendamento salvo com sucesso!', type: 'success' });
+      setAgendaModalData(null);
+      return;
+    }
 
-      // Sync: when appointment is marked as completed → advance lead stage
-      if (payload.status === 'concluido' && wasNotCompleted && payload.lead_uuid) {
+    const isNew = !appointments.find(a => a.id === payload.id);
+    const wasNotCompleted = appointments.find(a => a.id === payload.id)?.status !== 'concluido';
+
+    // T18: se é uma VISITA sendo marcada como concluída → abrir modal de registro pós-visita
+    if (
+      payload.appointment_type === 'visita' &&
+      payload.status === 'concluido' &&
+      wasNotCompleted &&
+      !isNew
+    ) {
+      setAgendaModalData(null);
+      setVisitRegModalData(payload); // store payload; handle completion inside handleVisitSave
+      return;
+    }
+
+    // --- Fluxo normal (outros tipos ou novo agendamento) ---
+    if (isNew) {
+      setAppointments(prev => [...prev, payload]);
+    } else {
+      setAppointments(prev => prev.map(a => a.id === payload.id ? payload : a));
+    }
+
+    // T14: toast rico ao criar agendamento
+    if (isNew) {
+      const apptDate = new Date(payload.start_time);
+      const dayLabel = apptDate.toLocaleDateString('pt-BR', { weekday: 'long', timeZone: 'America/Sao_Paulo' });
+      const timeLabel = apptDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+      const nameLabel = payload.lead_name || payload.title || 'Agendamento';
+      setToast({
+        message: `📅 Visita agendada!`,
+        subtitle: `${nameLabel} · ${dayLabel} ${timeLabel}`,
+        type: 'success',
+      });
+    } else {
+      setToast({ message: 'Agendamento atualizado!', type: 'success' });
+    }
+
+    // 🔥 Streak: register action (with toast feedback)
+    if (isNew) {
+      registerStreakAction('appointment_created', payload.lead_uuid || null);
+    } else if (payload.status === 'concluido' && wasNotCompleted && payload.appointment_type !== 'visita') {
+      // non-visit completions still advance stage via old logic
+      if (payload.lead_uuid) {
         import('./hooks/useSyncLeadStage.js').then(async ({ onAppointmentCompleted }) => {
           const updatedLead = await onAppointmentCompleted(payload);
           if (updatedLead) {
@@ -1400,15 +1723,59 @@ export default function App() {
           }
         });
       }
-
-      // Sync to Google Calendar if connected
-      if (googleCal.isConnected && isNew) {
-        googleCal.createEvent(payload).catch(e => {
-          console.error('Google Calendar sync error:', e);
-        });
-      }
     }
+
+    // Sync to Google Calendar if connected
+    if (googleCal.isConnected && isNew) {
+      googleCal.createEvent(payload).catch(e => {
+        console.error('Google Calendar sync error:', e);
+      });
+    }
+
     setAgendaModalData(null);
+  };
+
+  // T18: chamado quando usuário salva o registro pós-visita
+  const handleVisitSave = async (regData) => {
+    const appointment = visitRegModalData;
+    try {
+      const { updatedLead } = await saveVisitRegistration(appointment, regData);
+
+      // Update local appointments state
+      setAppointments(prev => prev.map(a =>
+        a.id === appointment.id
+          ? { ...a, status: 'concluido', completed_at: new Date().toISOString(),
+              visit_feedback: regData.feedback, visit_objection: regData.objection,
+              visit_next_step: regData.nextStep, visit_notes: regData.notes }
+          : a
+      ));
+
+      // Update local lead state
+      if (updatedLead) {
+        setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
+      }
+
+      // 🔥 Streak
+      registerStreakAction('visit_registered', appointment.lead_uuid || null);
+
+      const leadName = appointment.lead_name || updatedLead?.name || 'Lead';
+      const stageLabel = updatedLead?.stage || '';
+      setToast({
+        message: `✅ Visita registrada!`,
+        subtitle: stageLabel ? `${leadName} → ${stageLabel}` : leadName,
+        type: 'success',
+      });
+
+      setVisitRegModalData(null);
+
+      // T21: check badges after visit (especialista)
+      checkAndUnlockBadges().then(newly => {
+        if (newly.length > 0) setNewBadgeQueue(q => [...q, ...newly]);
+      }).catch(() => {});
+    } catch (e) {
+      console.error('handleVisitSave error:', e);
+      throw e; // re-throw so modal can show error state
+    }
   };
 
   const handleLogin = async (e) => {
@@ -1441,6 +1808,35 @@ export default function App() {
     }).then(r => r.json()).then(data => {
       if (Array.isArray(data)) setFollowupsBadge(data.length);
     }).catch(() => {});
+  }, [session]);
+
+  // T14: Counter de ações diárias
+  const [dailyActionCount, setDailyActionCount] = useState(0);
+  const [counterBumping, setCounterBumping] = useState(false);
+  const prevDailyCount = useRef(0);
+  useEffect(() => {
+    if (!session) return;
+    const SB_URL = 'https://hcmpjrqpjohksoznoycq.supabase.co';
+    const SB_KEY = supabaseKey;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const poll = () => {
+      fetch(`${SB_URL}/rest/v1/daily_actions?action_date=eq.${todayStr}&select=id`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
+      }).then(r => r.json()).then(data => {
+        if (Array.isArray(data)) {
+          const count = data.length;
+          if (count !== prevDailyCount.current) {
+            setCounterBumping(true);
+            setTimeout(() => setCounterBumping(false), 250);
+            prevDailyCount.current = count;
+          }
+          setDailyActionCount(count);
+        }
+      }).catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, 30000);
+    return () => clearInterval(interval);
   }, [session]);
 
   if (!isReady || loadingAuth) {
@@ -1508,9 +1904,10 @@ export default function App() {
   };
 
   const ROUTE_TITLES = {
-    dashboard: 'Dashboard', crm: 'Gestão de Leads', followups: 'Follow-ups',
-    conversas: 'Conversas', agenda: 'Agenda', properties: 'Imóveis',
-    comissoes: 'Comissões', relatorios: 'Relatórios', settings: 'Configurações',
+    dashboard: 'Cockpit', crm: 'Suas Oportunidades', followups: 'Ações Pendentes',
+    conversas: 'Chat', agenda: 'Agenda', properties: 'Carteira de Imóveis',
+    comissoes: 'Seus Ganhos', relatorios: 'Performance', settings: 'Configurações',
+    badges: 'Conquistas',
   };
 
   return (
@@ -1526,6 +1923,15 @@ export default function App() {
         />
       )}
 
+      {/* T18: Registro pós-visita — obrigatório, não pode fechar */}
+      {visitRegModalData && (
+        <VisitRegistrationModal
+          appointment={visitRegModalData}
+          onSave={handleVisitSave}
+          onCancel={() => setVisitRegModalData(null)}
+        />
+      )}
+
       {/* DESKTOP SIDEBAR (hidden on mobile) */}
       <aside className="hidden md:flex w-64 bg-[#1B2B3A] text-white flex-col flex-shrink-0">
         <div className="p-6 flex items-center space-x-3">
@@ -1533,15 +1939,16 @@ export default function App() {
           <span className="text-xl font-bold font-serif tracking-wide">Viva Beiramar</span>
         </div>
         <nav className="flex-1 px-4 space-y-2 mt-4">
-          <NavItem icon={LayoutDashboard} label="Dashboard" route="dashboard" />
-          <NavItem icon={Users} label="CRM / Leads" route="crm" />
-          <NavItem icon={PhoneForwarded} label="Follow-ups" route="followups" badge={followupsBadge} />
-          <NavItem icon={MessageSquare} label="Conversas" route="conversas" badge={3} />
+          <NavItem icon={LayoutDashboard} label="Cockpit" route="dashboard" />
+          <NavItem icon={Users} label="Oportunidades" route="crm" />
+          <NavItem icon={PhoneForwarded} label="Ações Pendentes" route="followups" badge={followupsBadge} />
+          <NavItem icon={MessageSquare} label="Chat" route="conversas" badge={3} />
           <NavItem icon={CalendarDays} label="Agenda" route="agenda" alert={!!upcomingAppointment} />
-          <NavItem icon={Home} label="Imóveis" route="properties" />
+          <NavItem icon={Home} label="Carteira" route="properties" />
           <NavItem icon={DollarSign} label="Comissões" route="comissoes" />
-          <NavItem icon={BarChart3} label="Relatórios" route="relatorios" />
-          <NavItem icon={Settings} label="Configurações" route="settings" />
+          <NavItem icon={BarChart3} label="Performance" route="relatorios" />
+          <NavItem icon={Trophy} label="Conquistas" route="badges" />
+          <NavItem icon={Settings} label="Config" route="settings" />
         </nav>
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center space-x-3 px-4 py-3">
@@ -1578,21 +1985,44 @@ export default function App() {
 
         {/* Page content — padded, with bottom space for mobile nav */}
         <div className={`flex-1 overflow-auto relative ${currentRoute === 'conversas' ? 'p-0 md:p-6' : 'p-3 md:p-8'} pb-20 md:pb-8`}>
-          {currentRoute === 'dashboard' && <CockpitDashboard session={session} />}
+          {currentRoute === 'dashboard' && <CockpitDashboard session={session} onNavigate={setCurrentRoute} />}
           {currentRoute === 'crm' && <CRM leads={leads} properties={properties} updateLead={updateLeadInState} setToast={setToast} reloadData={loadData} openAgendaModal={setAgendaModalData} />}
           {currentRoute === 'conversas' && <ConversasPage session={session} setCurrentRoute={setCurrentRoute} />}
-          {currentRoute === 'agenda' && <Agenda appointments={appointments} setAppointments={setAppointments} leads={leads} properties={properties} googleCal={googleCal} openAgendaModal={setAgendaModalData} setToast={setToast} />}
+          {currentRoute === 'agenda' && <Agenda appointments={appointments} setAppointments={setAppointments} leads={leads} properties={properties} googleCal={googleCal} openAgendaModal={setAgendaModalData} setToast={setToast} onCompleteVisit={setVisitRegModalData} />}
           {currentRoute === 'properties' && <AdminImoveis session={session} />}
           {currentRoute === 'followups' && <FollowUpsPage session={session} />}
           {currentRoute === 'comissoes' && <ComissoesPage session={session} />}
           {currentRoute === 'relatorios' && <RelatoriosPage session={session} />}
           {currentRoute === 'settings' && <SettingsPage uazConfig={uazConfig} setUazConfig={setUazConfig} googleCal={googleCal} setToast={setToast} />}
+          {currentRoute === 'badges' && <BadgesPage session={session} />}
+
+          {/* T14: Counter de ações diárias — widget flutuante */}
+          {session && dailyActionCount > 0 && (
+            <div className="fixed bottom-24 right-4 md:bottom-6 z-40 pointer-events-none">
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-md border transition-colors ${
+                dailyActionCount >= 10
+                  ? 'bg-[#1B2B3A] text-[#c9a84c] border-[#c9a84c]/30'
+                  : dailyActionCount >= 5
+                  ? 'bg-emerald-600 text-white border-emerald-500'
+                  : 'bg-white text-gray-700 border-gray-200'
+              } ${counterBumping ? 'counter-bump' : ''}`}>
+                <span>{dailyActionCount >= 10 ? '⚡' : dailyActionCount >= 5 ? '🔥' : '⚡'}</span>
+                <span className="tabular-nums">
+                  {dailyActionCount >= 10
+                    ? `${dailyActionCount} ações! Imba!`
+                    : dailyActionCount >= 5
+                    ? `${dailyActionCount} ações! Produtivo!`
+                    : `${dailyActionCount} ações hoje`}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* MOBILE BOTTOM NAV (hidden on desktop) */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#E8E2D8] flex items-center z-50 safe-bottom">
-          <BottomTab icon={LayoutDashboard} label="Home" route="dashboard" />
-          <BottomTab icon={Users} label="CRM" route="crm" />
+          <BottomTab icon={LayoutDashboard} label="Cockpit" route="dashboard" />
+          <BottomTab icon={Users} label="Oportun." route="crm" />
           <BottomTab icon={MessageSquare} label="Chat" route="conversas" badge={3} />
           <BottomTab icon={CalendarDays} label="Agenda" route="agenda" />
           {/* More menu */}
@@ -1611,10 +2041,11 @@ export default function App() {
               <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
               <div className="grid grid-cols-4 gap-3">
                 {[
-                  { icon: PhoneForwarded, label: 'Follow-ups', route: 'followups', badge: followupsBadge },
-                  { icon: Home, label: 'Imóveis', route: 'properties' },
-                  { icon: DollarSign, label: 'Comissões', route: 'comissoes' },
-                  { icon: BarChart3, label: 'Relatórios', route: 'relatorios' },
+                  { icon: PhoneForwarded, label: 'Ações', route: 'followups', badge: followupsBadge },
+                  { icon: Home, label: 'Carteira', route: 'properties' },
+                  { icon: DollarSign, label: 'Ganhos', route: 'comissoes' },
+                  { icon: BarChart3, label: 'Performance', route: 'relatorios' },
+                  { icon: Trophy, label: 'Conquistas', route: 'badges' },
                   { icon: Settings, label: 'Config', route: 'settings' },
                 ].map(item => (
                   <button key={item.route} onClick={() => { setCurrentRoute(item.route); setShowMoreMenu(false); }}
@@ -1629,6 +2060,14 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* T21: Badge celebration overlay queue */}
+      {newBadgeQueue.length > 0 && badgeDefs[newBadgeQueue[0]] && (
+        <BadgeCelebration
+          badge={badgeDefs[newBadgeQueue[0]]}
+          onClose={() => setNewBadgeQueue(q => q.slice(1))}
+        />
+      )}
     </div>
   );
 }

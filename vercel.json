@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "api/webhook/lead.js": {
+      "maxDuration": 10
+    },
+    "api/feed/vrsync.js": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/:path*" },
+    { "source": "/:path((?!api/).*)", "destination": "/index.html" }
+  ]
+}

@@ -29,6 +29,23 @@ const FUNNEL_STAGES = [
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
+// --- Prediction Engine Helpers ---
+function getNextProbability(currentProb) {
+  if (currentProb < 30) return currentProb + 15;
+  if (currentProb < 50) return currentProb + 20;
+  if (currentProb < 75) return currentProb + 15;
+  if (currentProb < 90) return currentProb + 10;
+  return Math.min(currentProb + 5, 100);
+}
+
+function getRecommendedAction(prob, temp) {
+  if (prob >= 90) return 'Fechar contrato';
+  if (prob >= 65) return 'Enviar proposta';
+  if (prob >= 40) return 'Fazer follow-up';
+  if (temp === 'QUENTE' || temp === 'MORNO') return 'Agendar visita';
+  return 'Fazer follow-up';
+}
+
 export function useDashboardData(session) {
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,7 +64,10 @@ export function useDashboardData(session) {
       const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
       const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
 
-      const [activeDeals, closedMonth, funnelDeals, topDeals, followPending, followOverdue, visitsWeek, nextAppt, settings] = await Promise.all([
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 0, 0, 0, -1).toISOString();
+
+      const [activeDeals, closedMonth, funnelDeals, topDeals, followPending, followOverdue, visitsWeek, nextAppt, settings, predictionDeals, hotDeals, todayAppts, overdueFollowups] = await Promise.all([
         sb('pipeline_deals', `?status=neq.fechado&status=neq.perdido&status=neq.cancelado&select=deal_value,commission_value,commission_rate`),
         sb('pipeline_deals', `?status=eq.fechado&closed_at=gte.${monthStart}&select=commission_value`),
         sb('pipeline_deals', `?created_at=gte.${ninetyDaysAgo}&select=status`),
@@ -59,6 +79,14 @@ export function useDashboardData(session) {
         // JOIN with crm_leads for next appointment
         sb('agenda_appointments', `?start_time=gte.${now.toISOString()}&start_time=lte.${twoHoursAhead}&status=in.(agendado,confirmado)&order=start_time.asc&limit=1&select=id,title,start_time,appointment_type,crm_leads!lead_uuid(name)`).catch(() => ({ data: [] })),
         sb('admin_settings', `?key=in.(monthly_goal,default_commission_rate)&select=key,value`),
+        // Prediction engine: active deals with full lead/property joins
+        sb('pipeline_deals', `?status=neq.fechado&status=neq.perdido&status=neq.cancelado&select=id,deal_value,commission_rate,probability,status,crm_leads!lead_uuid(name,phone,stage,temperatura,updated_at),properties!property_id(title,neighborhood)`),
+        // T11: Hot deals (prob >= 75%) for URGENTE category
+        sb('pipeline_deals', `?probability=gte.75&status=neq.fechado&status=neq.perdido&status=neq.cancelado&order=probability.desc&limit=5&select=id,deal_value,commission_value,commission_rate,probability,status,crm_leads!lead_uuid(name,phone),properties!property_id(title)`),
+        // T11: Appointments today + tomorrow
+        sb('agenda_appointments', `?start_time=gte.${todayStart}&start_time=lte.${tomorrowEnd}&status=in.(agendado,confirmado)&order=start_time.asc&limit=5&select=id,title,start_time,appointment_type,crm_leads!lead_uuid(name,phone),properties!property_id(title)`).catch(() => ({ data: [] })),
+        // T11: Overdue follow-ups with deal values
+        sb('follow_ups', `?status=eq.pendente&due_date=lt.${now.toISOString()}&select=id,lead_uuid,crm_leads!lead_uuid(name,pipeline_deals!pipeline_deals_lead_uuid_fkey(deal_value))`).catch(() => ({ data: [] })),
       ]);
 
       // Métricas
@@ -122,6 +150,140 @@ export function useDashboardData(session) {
         };
       });
 
+      // --- Motor de Previsão de Comissão ---
+      const predDeals = predictionDeals.data.map(d => ({
+        id: d.id,
+        deal_value: d.deal_value || 0,
+        commission_rate: d.commission_rate || 0.03,
+        probability: d.probability || 0,
+        status: d.status,
+        lead_name: d.crm_leads?.name || '—',
+        lead_phone: d.crm_leads?.phone || '',
+        lead_temperatura: d.crm_leads?.temperatura || '',
+        lead_updated_at: d.crm_leads?.updated_at || null,
+        property_title: d.properties?.title || '',
+        property_neighborhood: d.properties?.neighborhood || '',
+      }));
+
+      const conservador = predDeals
+        .filter(d => d.probability >= 80)
+        .reduce((sum, d) => sum + d.deal_value * d.commission_rate, 0);
+      const provavel = predDeals
+        .reduce((sum, d) => sum + d.deal_value * d.commission_rate * d.probability / 100, 0);
+      const otimista = predDeals
+        .reduce((sum, d) => sum + d.deal_value * d.commission_rate, 0);
+
+      const dealActions = predDeals.map(d => {
+        const commission = d.deal_value * d.commission_rate;
+        const nextProb = getNextProbability(d.probability);
+        const gainPotential = d.deal_value * d.commission_rate * (nextProb - d.probability) / 100;
+        const action = getRecommendedAction(d.probability, d.lead_temperatura);
+        const daysSinceContact = d.lead_updated_at
+          ? Math.floor((now - new Date(d.lead_updated_at)) / 86400000)
+          : null;
+        return {
+          ...d,
+          commission,
+          nextProb,
+          gainPotential,
+          action,
+          daysSinceContact,
+          atRisk: daysSinceContact !== null && daysSinceContact >= 3,
+        };
+      }).sort((a, b) => b.gainPotential - a.gainPotential);
+
+      const seAgirHoje = provavel + dealActions.reduce((sum, d) => sum + d.gainPotential, 0);
+      const ganhoExtra = seAgirHoje - provavel;
+      const percentMetaPrediction = monthlyGoal > 0
+        ? Math.round((monthlyAchieved + provavel) / monthlyGoal * 100) : 0;
+      const atRiskDeals = dealActions.filter(d => d.atRisk);
+      const atRiskTotal = atRiskDeals.reduce((sum, d) => sum + d.commission, 0);
+
+      // --- T11: Prioritized Actions ---
+      // 1. URGENTE — hot deals (prob >= 75%)
+      const urgentActions = (hotDeals.data || []).map(d => ({
+        id: `hot-${d.id}`,
+        category: 'urgente',
+        lead_name: d.crm_leads?.name || '—',
+        lead_phone: d.crm_leads?.phone || '',
+        property_title: d.properties?.title || '',
+        action: d.probability >= 90 ? 'Fechar contrato' : 'Enviar proposta',
+        commission: (d.commission_value || 0) || (d.deal_value || 0) * (d.commission_rate || 0.03),
+        probability: d.probability || 0,
+        sortValue: (d.commission_value || 0) || (d.deal_value || 0) * (d.commission_rate || 0.03),
+      }));
+
+      // 2. HOJE — agendamentos de hoje/amanhã
+      const todayApptActions = (todayAppts.data || []).map(a => {
+        const apptDate = new Date(a.start_time);
+        const isToday = apptDate.toDateString() === now.toDateString();
+        const timeLabel = apptDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+        return {
+          id: `appt-${a.id}`,
+          category: 'hoje',
+          lead_name: a.crm_leads?.name || '—',
+          lead_phone: a.crm_leads?.phone || '',
+          property_title: a.properties?.title || '',
+          action: isToday ? `Confirmar visita hoje ${timeLabel}` : `Confirmar visita amanhã ${timeLabel}`,
+          commission: 0,
+          probability: 0,
+          sortValue: 0,
+          appointmentTime: a.start_time,
+          isAppointment: true,
+        };
+      });
+
+      // 3. HOJE — follow-ups atrasados agrupados
+      const overdueList = Array.isArray(overdueFollowups.data) ? overdueFollowups.data : [];
+      const overdueTotal = overdueList.reduce((sum, f) => {
+        const deals = f.crm_leads?.pipeline_deals || [];
+        return sum + deals.reduce((s, d) => s + (d.deal_value || 0), 0);
+      }, 0);
+      const overdueGrouped = overdueList.length > 0 ? [{
+        id: 'overdue-group',
+        category: 'hoje',
+        lead_name: `${overdueList.length} follow-up${overdueList.length > 1 ? 's' : ''} atrasado${overdueList.length > 1 ? 's' : ''}`,
+        lead_phone: '',
+        property_title: '',
+        action: 'Resolver agora',
+        commission: 0,
+        probability: 0,
+        sortValue: overdueTotal,
+        overdueCount: overdueList.length,
+        overdueTotal,
+        isOverdueGroup: true,
+      }] : [];
+
+      // 4. OPORTUNIDADE — medium prob deals from prediction engine
+      const opportunityActions = dealActions
+        .filter(d => d.probability >= 30 && d.probability < 75)
+        .slice(0, 3)
+        .map(d => ({
+          id: `opp-${d.id}`,
+          category: 'oportunidade',
+          lead_name: d.lead_name,
+          lead_phone: d.lead_phone,
+          property_title: d.property_title,
+          action: d.action,
+          commission: d.commission,
+          probability: d.probability,
+          gainPotential: d.gainPotential,
+          sortValue: d.commission,
+        }));
+
+      // Sort each category by sortValue DESC
+      urgentActions.sort((a, b) => b.sortValue - a.sortValue);
+      opportunityActions.sort((a, b) => b.sortValue - a.sortValue);
+
+      const prioritizedActions = [
+        ...urgentActions,
+        ...todayApptActions,
+        ...overdueGrouped,
+        ...opportunityActions,
+      ].slice(0, 8); // show max 8, user can expand
+
+      const totalPrioritized = urgentActions.length + todayApptActions.length + overdueGrouped.length + opportunityActions.length;
+
       setData({
         metrics: {
           pipeline_total: pipelineTotal,
@@ -144,6 +306,21 @@ export function useDashboardData(session) {
         topDeals: topDealsList,
         nextAppointment,
         projection,
+        prioritizedActions,
+        totalPrioritizedActions: totalPrioritized,
+        prediction: {
+          conservador,
+          provavel,
+          otimista,
+          seAgirHoje,
+          ganhoExtra,
+          percentMeta: percentMetaPrediction,
+          monthlyGoal,
+          monthlyAchieved,
+          dealActions: dealActions.slice(0, 6),
+          atRiskDeals,
+          atRiskTotal,
+        },
       });
     } catch (err) {
       console.error(err);

@@ -1,11 +1,19 @@
 import { useState } from 'react';
 import {
   ListChecks, Plus, Phone, Calendar, Check, CheckCheck,
-  Clock, AlertCircle, ChevronDown, Search, X, Send, MessageSquare, Edit3
+  Clock, AlertCircle, ChevronDown, Search, X, Send, MessageSquare, Edit3,
+  TrendingDown, Zap
 } from 'lucide-react';
 import { useFollowUps } from '../../hooks/useFollowUps';
+import { registerAction } from '../../hooks/useStreak';
 
 const fmt = new Intl.NumberFormat('pt-BR');
+const fmtCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v);
+const fmtCompact = (v) => {
+  if (v >= 1_000_000) return `R$ ${(v/1_000_000).toFixed(1).replace('.',',')}M`;
+  if (v >= 1_000) return `R$ ${(v/1_000).toFixed(0)}k`;
+  return fmtCurrency(v);
+};
 const fmtDate = (d) => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Sao_Paulo' });
 const fmtTime = (d) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
 
@@ -69,11 +77,12 @@ const TEMP_COLORS = {
 const Sk = ({ w = 'w-full', h = 'h-4' }) => <div className={`${w} ${h} bg-gray-200 rounded animate-pulse`} />;
 
 // --- Card de Follow-up ---
-function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkResponded, onDelay, onReschedule, sending }) {
+function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkResponded, onDelay, onReschedule, sending, dailyCount }) {
   const [showReschedule, setShowReschedule] = useState(false);
   const [newDate, setNewDate] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState('');
+  const [successFlash, setSuccessFlash] = useState(false); // T14
   const dot = urgencyDot(fu.due_date, todayStr);
   const label = timeLabel(fu.due_date, todayStr, tomorrowStr);
   const isOverdue = fu.due_date?.slice(0, 10) < todayStr;
@@ -87,9 +96,10 @@ function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkRes
     setIsEditing(true);
   };
 
-  const handleSendEdited = () => {
-    onSend({ ...fu, message_text: editedText });
+  const handleSendEdited = async () => {
+    const ok = await onSend({ ...fu, message_text: editedText });
     setIsEditing(false);
+    if (ok !== false) { setSuccessFlash(true); setTimeout(() => setSuccessFlash(false), 1500); }
   };
 
   return (
@@ -112,17 +122,34 @@ function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkRes
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isOverdue ? 'bg-red-50 text-red-600' : isToday ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500'}`}>
                 {label}
               </span>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                fu.status === 'enviado' ? 'bg-blue-50 text-blue-600'
-                : fu.status === 'respondido' ? 'bg-emerald-50 text-emerald-700'
-                : fu.status === 'ignorado' ? 'bg-gray-100 text-gray-400'
-                : isOverdue ? 'bg-red-50 text-red-600'
-                : 'bg-amber-50 text-amber-700'
-              }`}>
-                {fu.status === 'pendente' ? (isOverdue ? 'ATRASADO' : 'PENDENTE') : fu.status.toUpperCase()}
-              </span>
+              {/* T19: Pós-venda tag takes priority */}
+              {fu.template_key?.startsWith('pos_venda_') ? (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 bg-blue-50 text-blue-700 border border-blue-100">
+                  🏡 PÓS-VENDA
+                </span>
+              ) : (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  fu.status === 'enviado' ? 'bg-blue-50 text-blue-600'
+                  : fu.status === 'respondido' ? 'bg-emerald-50 text-emerald-700'
+                  : fu.status === 'ignorado' ? 'bg-gray-100 text-gray-400'
+                  : isOverdue ? 'bg-red-50 text-red-600'
+                  : 'bg-amber-50 text-amber-700'
+                }`}>
+                  {fu.status === 'pendente' ? (isOverdue ? 'EM RISCO 🔴' : 'A FAZER') : fu.status.toUpperCase() === 'ENVIADO' ? 'CONCLUÍDA' : fu.status.toUpperCase()}
+                </span>
+              )}
             </div>
           </div>
+
+          {/* T13: Comissão em jogo */}
+          {fu.commission_value > 0 && (
+            <div className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg mb-2 ${
+              isOverdue ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              💰 Comissão em jogo: {fmtCurrency(Math.round(fu.commission_value))}
+              {fu.deal_value > 0 && <span className="font-normal text-gray-400">· {fmtCompact(fu.deal_value)} pipeline</span>}
+            </div>
+          )}
 
           {/* Message — editable or preview */}
           {isEditing ? (
@@ -153,9 +180,26 @@ function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkRes
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors">
                     ✏️ Editar
                   </button>
-                  <button onClick={() => onSend({ ...fu, message_text: displayMessage })} disabled={sending === fu.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366] hover:bg-[#1fba58] text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50">
-                    <MessageSquare className="w-3.5 h-3.5" />{sending === fu.id ? 'Enviando…' : 'Enviar WhatsApp'}
+                  {/* T14: Agir agora — success flash */}
+                  <button
+                    onClick={async () => {
+                      const ok = await onSend({ ...fu, message_text: displayMessage });
+                      if (ok !== false) {
+                        setSuccessFlash(true);
+                        setTimeout(() => setSuccessFlash(false), 1500);
+                      }
+                    }}
+                    disabled={sending === fu.id}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all disabled:opacity-50 ${
+                      successFlash
+                        ? 'btn-success-flash'
+                        : 'bg-[#25D366] hover:bg-[#1fba58] text-white'
+                    }`}>
+                    {sending === fu.id
+                      ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Enviando…</>
+                      : successFlash
+                      ? <>✅ Enviado!</>
+                      : <><MessageSquare className="w-3.5 h-3.5" /> Agir Agora</>}
                   </button>
                   <button onClick={() => onDelay(fu.id, fu.due_date)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors">
@@ -167,7 +211,7 @@ function FollowUpCard({ fu, todayStr, tomorrowStr, onSend, onMarkSent, onMarkRes
                   </button>
                   <button onClick={() => onMarkSent(fu.id)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium rounded-lg transition-colors">
-                    <Check className="w-3.5 h-3.5" /> Marcar enviado
+                    <Check className="w-3.5 h-3.5" /> Concluir ✓
                   </button>
                 </>
               )}
@@ -288,11 +332,15 @@ function NovoFollowUpModal({ templates, leads, onSave, onClose }) {
 }
 
 // --- PÁGINA PRINCIPAL ---
-const FILTERS = ['Hoje', 'Amanhã', 'Esta semana', 'Atrasados', 'Todos'];
+const FILTERS = ['Hoje', 'Amanhã', 'Esta semana', 'Atrasados', 'Pós-venda', 'Todos'];
+
+// T19: identify post-sale follow-ups
+const isPostSale = (fu) => fu.template_key?.startsWith('pos_venda_') || fu.type === 'reengajamento' && fu.template_key?.startsWith('pos_venda_');
 
 export default function FollowUpsPage({ session }) {
   const {
     followUps, templates, leads, isLoading, metrics,
+    valorEsfriando, previsaoSemAcao, previsaoComAcao, todayActionsCount,
     markSent, markResponded, reschedule, delay1Day, sendWhatsApp, createFollowUp,
     todayStr, tomorrowStr,
   } = useFollowUps(session);
@@ -312,7 +360,33 @@ export default function FollowUpsPage({ session }) {
     setSending(fu.id);
     const ok = await sendWhatsApp(fu);
     setSending(null);
-    showToast(ok ? '✅ Mensagem enviada!' : '❌ Falha ao enviar. Verifique o UAZAPI.', ok ? 'success' : 'error');
+    if (ok) {
+      const res = await registerAction('followup_sent', fu.lead_uuid || fu.lead_id || null).catch(() => null);
+      if (res && res.newStreak > res.prevStreak) {
+        const msg = res.isNewRecord
+          ? `🏆 Novo recorde! ${res.newStreak} dias consecutivos!`
+          : `🔥 ${res.newStreak} dias! Streak mantido!`;
+        showToast(msg, 'success');
+        return;
+      }
+      // T14: toast complementar com ações do dia
+      const todayStr = new Date().toISOString().slice(0, 10);
+      let todayCount = 0;
+      try {
+        const SB_URL = 'https://hcmpjrqpjohksoznoycq.supabase.co';
+        const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjbXBqcnFwam9oa3Nvem5veWNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5OTk0NjAsImV4cCI6MjA4ODU3NTQ2MH0.XRWi4ZULpICkTucXgGVQCP5wq1RmVwOFWTdMrOEMDnw';
+        const r = await fetch(`${SB_URL}/rest/v1/daily_actions?action_date=eq.${todayStr}&select=id`, {
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
+        });
+        const data = await r.json();
+        if (Array.isArray(data)) todayCount = data.length;
+      } catch (_) {}
+      const remaining = Math.max(0, 5 - todayCount);
+      const suffix = remaining > 0 ? ` · Faltam ${remaining} pra meta!` : ' · Meta batida! 🔥';
+      showToast(`✅ Enviada!${suffix}`, 'success');
+    } else {
+      showToast(ok ? '✅ Mensagem enviada!' : '❌ Falha ao enviar. Verifique o UAZAPI.', ok ? 'success' : 'error');
+    }
   };
 
   const handleCreate = async (data) => {
@@ -332,19 +406,37 @@ export default function FollowUpsPage({ session }) {
     if (activeFilter === 'Amanhã') return d === tomorrowStr;
     if (activeFilter === 'Esta semana') return d >= todayStr && d <= weekEndStr;
     if (activeFilter === 'Atrasados') return d < todayStr && fu.status === 'pendente';
+    // T19: Pós-venda filter
+    if (activeFilter === 'Pós-venda') return fu.template_key?.startsWith('pos_venda_');
     return true;
   }).filter(fu =>
     !search || fu.lead_name?.toLowerCase().includes(search.toLowerCase()) || fu.message_text?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Agrupar
-  const atrasados = filtered.filter(f => f.due_date.slice(0, 10) < todayStr && f.status === 'pendente');
-  const hoje = filtered.filter(f => f.due_date.slice(0, 10) === todayStr);
-  const futuros = filtered.filter(f => f.due_date.slice(0, 10) > todayStr);
-  const enviados = filtered.filter(f => f.status === 'enviado');
+  // T19: count post-sale follow-ups for badge in filter tab
+  const postSaleCount = followUps.filter(fu => fu.template_key?.startsWith('pos_venda_') && fu.status === 'pendente').length;
 
-  const Group = ({ title, items, color }) => items.length === 0 ? null : (
-    <div>
+  // T13: Ordenar dentro de cada grupo por valor de comissão DESC (fallback: due_date)
+  const sortByValue = (arr) => [...arr].sort((a, b) => {
+    const diff = (b.commission_value || 0) - (a.commission_value || 0);
+    if (diff !== 0) return diff;
+    return new Date(a.due_date) - new Date(b.due_date); // fallback: mais antigo primeiro
+  });
+
+  // Agrupar — pós-venda separado dos demais
+  const postSaleFiltered = filtered.filter(f => f.template_key?.startsWith('pos_venda_'));
+  const regularFiltered = filtered.filter(f => !f.template_key?.startsWith('pos_venda_'));
+  const atrasados = sortByValue(regularFiltered.filter(f => f.due_date.slice(0, 10) < todayStr && f.status === 'pendente'));
+  const hoje = sortByValue(regularFiltered.filter(f => f.due_date.slice(0, 10) === todayStr));
+  const futuros = sortByValue(regularFiltered.filter(f => f.due_date.slice(0, 10) > todayStr));
+  const enviados = regularFiltered.filter(f => f.status === 'enviado');
+  // T19: post-sale sorted by due_date asc
+  const posVenda = [...postSaleFiltered].sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+
+  const valorEmRisco = atrasados.reduce((sum, f) => sum + (f.deal_value || 0), 0);
+
+  const Group = ({ title, items, color, id }) => items.length === 0 ? null : (
+    <div id={id}>
       <div className={`flex items-center gap-2 mb-3`}>
         <div className={`h-px flex-1 ${color}`} />
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
@@ -376,8 +468,8 @@ export default function FollowUpsPage({ session }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Follow-ups</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Zero lead esquecido</p>
+          <h1 className="text-xl font-semibold text-gray-900">Ações Pendentes</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Dinheiro não aceita preguiça</p>
         </div>
         <button onClick={() => setShowModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-[#c9a84c] hover:bg-[#b8923f] text-white text-sm font-medium rounded-lg transition-colors">
@@ -385,14 +477,50 @@ export default function FollowUpsPage({ session }) {
         </button>
       </div>
 
+      {/* === T13: HEADER DINHEIRO ESFRIANDO === */}
+      {valorEsfriando > 0 && !isLoading && (
+        <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-2xl p-5">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-2xl">⚠️</span>
+                <h2 className="text-xl font-bold text-red-700 tabular-nums">
+                  {fmtCompact(valorEsfriando)} esfriando
+                </h2>
+              </div>
+              <p className="text-red-600 text-sm font-medium">
+                {metrics.atrasados} oportunidade{metrics.atrasados !== 1 ? 's' : ''} sem contato
+              </p>
+              {previsaoSemAcao > 0 && (
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <TrendingDown className="w-4 h-4 text-red-500 flex-shrink-0" />
+                  <span className="text-sm text-red-700">
+                    Sem ação, previsão cai
+                    <span className="font-semibold tabular-nums"> {fmtCurrency(Math.round(previsaoComAcao))}</span>
+                    <span className="text-red-400 mx-1">→</span>
+                    <span className="font-semibold tabular-nums text-red-600">{fmtCurrency(Math.round(previsaoSemAcao))}</span>
+                  </span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => { const el = document.getElementById('em-risco-list'); if (el) window.scrollTo({ top: el.offsetTop - 80, behavior: 'smooth' }); }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors whitespace-nowrap self-start"
+            >
+              Resolver tudo agora ↓
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {isLoading ? Array.from({length:4}).map((_,i) => (
           <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse space-y-2"><Sk w="w-24"/><Sk w="w-12" h="h-8"/></div>
         )) : [
-          { label: 'Pendentes', value: metrics.pendentes, color: 'text-gray-900', bg: 'bg-white' },
-          { label: 'Atrasados', value: metrics.atrasados, color: metrics.atrasados > 0 ? 'text-red-600' : 'text-gray-900', bg: metrics.atrasados > 0 ? 'bg-red-50' : 'bg-white', icon: metrics.atrasados > 0 ? '🔴' : null },
-          { label: 'Enviados (mês)', value: metrics.enviados, color: 'text-blue-700', bg: 'bg-white' },
+          { label: 'A FAZER', value: metrics.pendentes, color: 'text-gray-900', bg: 'bg-white' },
+          { label: 'EM RISCO 🔴', value: metrics.atrasados, color: metrics.atrasados > 0 ? 'text-red-600' : 'text-gray-900', bg: metrics.atrasados > 0 ? 'bg-red-50' : 'bg-white', icon: '' },
+          { label: 'CONCLUÍDAS', value: metrics.enviados, color: 'text-blue-700', bg: 'bg-white' },
           { label: 'Taxa resposta', value: `${metrics.taxaResposta}%`, color: 'text-[#1D9E75]', bg: 'bg-white' },
         ].map((k, i) => (
           <div key={i} className={`${k.bg} rounded-xl border border-gray-100 p-4 shadow-sm`}>
@@ -402,13 +530,17 @@ export default function FollowUpsPage({ session }) {
         ))}
       </div>
 
-      {/* Filtros + Busca */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* Filtros + Busca + Counter diário */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
         <div className="flex bg-white border border-gray-100 rounded-lg p-1 gap-1 overflow-x-auto hide-scrollbar">
           {FILTERS.map(f => (
             <button key={f} onClick={() => setActiveFilter(f)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${activeFilter === f ? 'bg-[#1B2B3A] text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+              className={`relative px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${activeFilter === f ? 'bg-[#1B2B3A] text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
               {f}
+              {/* T19: badge for post-sale filter */}
+              {f === 'Pós-venda' && postSaleCount > 0 && (
+                <span className="ml-1 bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{postSaleCount}</span>
+              )}
             </button>
           ))}
         </div>
@@ -417,6 +549,29 @@ export default function FollowUpsPage({ session }) {
           <input type="text" placeholder="Buscar lead..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#c9a84c]" />
         </div>
+        {/* T13: Counter diário */}
+        {!isLoading && (
+          <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+            {todayActionsCount >= 5 ? (
+              <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200">
+                🔥 {todayActionsCount} ações hoje! Dia produtivo!
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 whitespace-nowrap">
+                  <Zap className="w-3 h-3 inline mr-1 text-amber-500" />
+                  Hoje: <span className="font-semibold text-gray-700">{todayActionsCount}/5</span>
+                </span>
+                <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min((todayActionsCount / 5) * 100, 100)}%`, backgroundColor: todayActionsCount >= 3 ? '#1D9E75' : '#c9a84c' }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Listas agrupadas */}
@@ -430,10 +585,14 @@ export default function FollowUpsPage({ session }) {
         </div>
       ) : (
         <div className="space-y-6">
-          <Group title="Atrasados" items={atrasados} color="bg-red-200" />
+          <Group id="em-risco-list" title="EM RISCO 🔴" items={atrasados} color="bg-red-200" />
           <Group title="Hoje" items={hoje} color="bg-green-200" />
           <Group title="Próximos" items={futuros} color="bg-gray-200" />
-          <Group title="Aguardando resposta" items={enviados} color="bg-blue-200" />
+          <Group title="CONCLUÍDAS" items={enviados} color="bg-blue-200" />
+          {/* T19: Pós-venda group — only shown when there are items OR filter is active */}
+          {(posVenda.length > 0 || activeFilter === 'Pós-venda') && (
+            <Group title="🏡 PÓS-VENDA" items={posVenda} color="bg-blue-200" />
+          )}
         </div>
       )}
     </div>

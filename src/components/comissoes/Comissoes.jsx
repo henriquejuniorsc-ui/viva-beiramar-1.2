@@ -198,8 +198,8 @@ export default function ComissoesPage({ session }) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Comissões</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Controle financeiro das suas vendas</p>
+          <h1 className="text-xl font-semibold text-gray-900">Seus Ganhos 💰</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Cada fechamento conta. Aqui está seu resultado.</p>
         </div>
         <div className="flex items-center gap-3">
           {/* Navegação de mês */}
@@ -220,9 +220,9 @@ export default function ComissoesPage({ session }) {
         {isLoading ? Array.from({length:4}).map((_,i) => (
           <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse space-y-2"><Sk w="w-24"/><Sk w="w-16" h="h-7"/><Sk w="w-20"/></div>
         )) : [
-          { label: 'Recebido', value: fmtCompact(metrics.recebidoTotal), sub: `${fechados.filter(d => d.payment_status === 'recebido').length} deal${fechados.filter(d=>d.payment_status==='recebido').length!==1?'s':''}`, color: 'text-[#1D9E75]', border: 'border-emerald-100' },
-          { label: 'A receber', value: fmtCompact(metrics.aReceberTotal), sub: `${deals.filter(d=>d.status==='fechado'&&d.payment_status!=='recebido').length} deal${deals.filter(d=>d.status==='fechado'&&d.payment_status!=='recebido').length!==1?'s':''}`, color: 'text-amber-600', border: 'border-amber-100' },
-          { label: 'Previsto', value: fmtCompact(metrics.previstoTotal), sub: `${deals.filter(d=>['proposta','contrato'].includes(d.status)).length} deals`, color: 'text-gray-700', border: 'border-gray-100' },
+          { label: 'No Bolso 💰', value: fmtCompact(metrics.recebidoTotal), sub: `${fechados.filter(d => d.payment_status === 'recebido').length} deal${fechados.filter(d=>d.payment_status==='recebido').length!==1?'s':''}`, color: 'text-[#1D9E75]', border: 'border-emerald-100' },
+          { label: 'Entrando', value: fmtCompact(metrics.aReceberTotal), sub: `${deals.filter(d=>d.status==='fechado'&&d.payment_status!=='recebido').length} deal${deals.filter(d=>d.status==='fechado'&&d.payment_status!=='recebido').length!==1?'s':''}`, color: 'text-amber-600', border: 'border-amber-100' },
+          { label: 'Previsão', value: fmtCompact(metrics.previstoTotal), sub: `${deals.filter(d=>['proposta','contrato'].includes(d.status)).length} deals`, color: 'text-gray-700', border: 'border-gray-100' },
           { label: 'Meta do mês', value: `${metrics.metaPct}%`, sub: `de ${fmtCompact(metrics.monthlyGoal)}`, color: metrics.metaPct >= 100 ? 'text-[#1D9E75]' : metrics.metaPct >= 50 ? 'text-amber-600' : 'text-gray-700', border: metrics.metaPct >= 100 ? 'border-emerald-100' : 'border-gray-100' },
         ].map((k, i) => (
           <div key={i} className={`bg-white rounded-xl border ${k.border} p-4 shadow-sm`}>

@@ -112,14 +112,14 @@ export default function RelatoriosPage({ session }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KPICard label="Leads recebidos" value={kpis.leadsRecebidos}
+          <KPICard label="Oportunidades recebidas" value={kpis.leadsRecebidos}
             icon={Users} color="bg-blue-50 text-blue-600" />
-          <KPICard label="Taxa de conversão" value={`${kpis.taxaConversao.toFixed(1)}%`}
+          <KPICard label="Taxa de fechamento" value={`${kpis.taxaConversao.toFixed(1)}%`}
             subtitle={`${filteredLeads.filter(l => l.stage === 'Fechado').length} fechados`}
             icon={TrendingUp} color="bg-green-50 text-green-600" />
-          <KPICard label="Tempo médio de resposta" value={formatMinutes(kpis.tempoMedioMin)}
+          <KPICard label="Velocidade de resposta" value={formatMinutes(kpis.tempoMedioMin)}
             icon={Clock} color="bg-amber-50 text-amber-600" />
-          <KPICard label="Ticket médio" value={formatBRL(kpis.ticketMedio)}
+          <KPICard label="Valor médio por venda" value={formatBRL(kpis.ticketMedio)}
             icon={DollarSign} color="bg-[#C4A265]/10 text-[#C4A265]" />
         </div>
       )}
